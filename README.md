@@ -1,1 +1,1 @@
-# Dungeons-and-Dragons-Helper
+# Dungeons-&-Dragons-Helper
