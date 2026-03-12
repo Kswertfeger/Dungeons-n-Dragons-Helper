@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="sdkName" value="Python 3.14 (DnDHelper)" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.14 (DnDHelper)" project-jdk-type="Python SDK" />
+  <component name="RunDashboard">
+    <option name="configurationTypes">
+      <set>
+        <option value="JavaScriptTestRunnerJest" />
+        <option value="PyRemoteDebugConfigurationType" />
+        <option value="ShConfigurationType" />
+        <option value="TerraformConfigurationType" />
+        <option value="js.build_tools.npm" />
+      </set>
+    </option>
+    <option name="excludedTypes">
+      <set>
+        <option value="HttpClient.HttpRequestRunConfigurationType" />
+      </set>
+    </option>
+  </component>
+</project>
