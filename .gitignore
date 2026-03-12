@@ -1,0 +1,26 @@
+# Python / Django
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+db.sqlite3
+backend/media/
+backend/model/saved_model/
+*.h5
+
+# React Native / Expo
+node_modules/
+.expo/
+dist/
+build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# General
+.DS_Store
+*.log
+.vscode/
