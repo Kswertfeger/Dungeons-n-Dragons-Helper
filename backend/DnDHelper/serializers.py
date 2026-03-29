@@ -1,10 +1,16 @@
 from rest_framework import serializers
 
-from backend.users import models
+from django.contrib.auth.models import User
+from characters.models import Character
 
 class UserSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(read_only=True)
 
     class Meta:
-        fields = ["full_name", "email"]
-        model = models.User
+        fields = ["username", "email", "is_staff"]
+        model = User
+
+class CharacterSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        exclude = ["user", "id"]
+        model = Character
