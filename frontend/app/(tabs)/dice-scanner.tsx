@@ -7,9 +7,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Constants from 'expo-constants';
 
-// Update this to your machine's local IP when testing on a physical device
-const API_URL = 'http://10.0.0.189:8000/analyze/';
+// Derives the backend URL from the Expo dev server host so it works at any location
+const devHost = Constants.expoConfig?.hostUri?.split(':')[0] ?? 'localhost';
+const API_URL = `http://${devHost}:8000/analyze/`;
 
 type ScanResult = { dice: number[]; total: number; count: number };
 
@@ -42,8 +44,13 @@ export default function DiceScannerScreen() {
     setResult(null);
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
+      console.log('Taking picture...');
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        skipProcessing: true,
+      });
       if (!photo) throw new Error('Failed to capture photo');
+      console.log('Photo captured:', photo.uri);
 
       const form = new FormData();
       form.append('image', {
@@ -52,10 +59,12 @@ export default function DiceScannerScreen() {
         type: 'image/jpeg',
       } as unknown as Blob);
 
+      console.log('Sending to:', API_URL);
       const response = await fetch(API_URL, {
         method: 'POST',
         body: form,
       });
+      console.log('Response status:', response.status);
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -64,6 +73,7 @@ export default function DiceScannerScreen() {
 
       setResult(await response.json());
     } catch (e: unknown) {
+      console.error('Scan error:', e);
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setLoading(false);
