@@ -1,45 +1,41 @@
 import os
-import io
-import numpy as np
-import tensorflow as tf
-from PIL import Image
+import pathlib
+import tempfile
+from inference_sdk import InferenceHTTPClient
 
-TFLITE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), 'd6.tflite'))
+ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "")
+ROBOFLOW_MODEL_ID = os.environ.get("ROBOFLOW_MODEL_ID", "dice-number-detection/4")
 
-_interpreter = None
-
-
-def _get_interpreter() -> tf.lite.Interpreter:
-    global _interpreter
-    if _interpreter is None:
-        _interpreter = tf.lite.Interpreter(model_path=TFLITE_PATH)
-        _interpreter.allocate_tensors()
-    return _interpreter
+_client = None
 
 
-def predict_face(image_bytes: bytes) -> dict:
-    """
-    Returns {"value": int, "confidence": float} where value is 1–6.
-    Raises FileNotFoundError if the model hasn't been trained/converted yet.
-    """
-    if not os.path.exists(TFLITE_PATH):
-        raise FileNotFoundError(
-            f'TFLite model not found at {TFLITE_PATH}. '
-            'Run train.py then convert.py first.'
+def _get_client() -> InferenceHTTPClient:
+    global _client
+    if _client is None:
+        _client = InferenceHTTPClient(
+            api_url="https://serverless.roboflow.com",
+            api_key=ROBOFLOW_API_KEY,
         )
+    return _client
 
-    interpreter = _get_interpreter()
-    input_details  = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB').resize((224, 224))
-    arr = np.array(img, dtype=np.float32)[np.newaxis]  # (1, 224, 224, 3)
+def predict_dice(image_bytes: bytes) -> list:
+    """
+    Sends image to Roboflow inference API and returns a list of detected
+    dice face values (integers 1–6), one per detected die.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp.write(image_bytes)
+        tmp_path = tmp.name
+    try:
+        result = _get_client().infer(tmp_path, model_id=ROBOFLOW_MODEL_ID)
+    finally:
+        pathlib.Path(tmp_path).unlink(missing_ok=True)
 
-    interpreter.set_tensor(input_details[0]['index'], arr)
-    interpreter.invoke()
-
-    probs = interpreter.get_tensor(output_details[0]['index'])[0]  # (6,)
-    face_value = int(np.argmax(probs)) + 1  # classes 0–5 → faces 1–6
-    confidence = float(np.max(probs))
-
-    return {'value': face_value, 'confidence': confidence}
+    values = []
+    for pred in result.get("predictions", []):
+        try:
+            values.append(int(pred["class"]))
+        except (KeyError, ValueError):
+            pass
+    return values

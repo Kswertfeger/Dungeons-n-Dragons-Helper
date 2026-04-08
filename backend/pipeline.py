@@ -1,11 +1,9 @@
-from model.predict import predict_face
+from model.predict import predict_dice
 
 
 def run_pipeline(image_file) -> dict:
     image_bytes = image_file.read()
-    result = predict_face(image_bytes)
-    return {
-        'dice':  [result['value']],
-        'total': result['value'],
-        'count': 1,
-    }
+    dice = predict_dice(image_bytes)
+    if not dice:
+        return {"dice": [], "total": 0, "count": 0, "error": "No dice detected"}
+    return {"dice": dice, "total": sum(dice), "count": len(dice)}

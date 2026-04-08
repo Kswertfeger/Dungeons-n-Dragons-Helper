@@ -1,98 +1,168 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { CharacterCard, CreateCharacterCard } from '@/components/character-card';
+import { Toast } from '@/components/toast';
+import { DnDColors } from '@/constants/colors';
+import { useAuth } from '@/context/auth-context';
+import { api, type Character } from '@/services/api';
+import { MaterialIcons } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function DashboardScreen() {
+  const { token, username, logout } = useAuth();
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
 
-export default function HomeScreen() {
+  const loadCharacters = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await api.getCharacters(token);
+      setCharacters(data);
+    } catch {
+      // silently fail on refresh
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      loadCharacters();
+    }, [loadCharacters]),
+  );
+
+  const handleDelete = (character: Character) => {
+    Alert.alert(
+      'Delete Character',
+      `Are you sure you want to delete ${character.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!token) return;
+            try {
+              await api.deleteCharacter(token, character.id);
+              setCharacters((prev) => prev.filter((c) => c.id !== character.id));
+            } catch {
+              setToast('Failed to delete character.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout', style: 'destructive', onPress: logout },
+    ]);
+  };
+
+  // Build list data: characters + create card sentinel
+  const listData: (Character | 'create')[] = [...characters, 'create'];
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Character Dashboard</Text>
+          {username ? (
+            <Text style={styles.subtitle}>Welcome back, {username}!</Text>
+          ) : null}
+        </View>
+        <Pressable onPress={handleLogout} style={styles.logoutBtn}>
+          <MaterialIcons name="logout" size={18} color={DnDColors.textMuted} />
+          <Text style={styles.logoutText}>Logout</Text>
+        </Pressable>
+      </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      {loading ? (
+        <ActivityIndicator color={DnDColors.accent} style={styles.loader} />
+      ) : (
+        <FlatList
+          data={listData}
+          keyExtractor={(item) => (item === 'create' ? 'create' : String(item.id))}
+          numColumns={2}
+          contentContainerStyle={styles.grid}
+          renderItem={({ item }) => {
+            if (item === 'create') {
+              return <CreateCharacterCard onPress={() => router.push('/create-character')} />;
+            }
+            return (
+              <CharacterCard
+                character={item}
+                onPress={() => router.push(`/character/${item.id}`)}
+                onDelete={() => handleDelete(item)}
+              />
+            );
+          }}
+        />
+      )}
+
+      <Toast message={toast} onHide={() => setToast(null)} />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: DnDColors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: DnDColors.border,
+  },
+  title: {
+    color: DnDColors.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  subtitle: {
+    color: DnDColors.textMuted,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: DnDColors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: DnDColors.border,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  logoutText: {
+    color: DnDColors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  grid: {
+    padding: 10,
+  },
+  loader: {
+    marginTop: 60,
   },
 });
