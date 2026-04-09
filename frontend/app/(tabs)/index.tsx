@@ -24,7 +24,7 @@ export default function DashboardScreen() {
   const [toast, setToast] = useState<string | null>(null);
 
   const loadCharacters = useCallback(async () => {
-    if (!token) return;
+    if (!token) { setLoading(false); return; }
     try {
       const data = await api.getCharacters(token);
       setCharacters(data);

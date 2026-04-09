@@ -1,10 +1,18 @@
 import { AuthProvider, useAuth } from '@/context/auth-context';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 function RootNavigator() {
   const { token, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && !token) {
+      router.replace('/(auth)/login');
+    }
+  }, [token, isLoading]);
 
   if (isLoading) return null;
 

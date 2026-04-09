@@ -1,7 +1,15 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
-const devHost = Constants.expoConfig?.hostUri?.split(':')[0] ?? 'localhost';
-export const BASE_URL = `http://${devHost}:8000`;
+const getBaseUrl = () => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:8000`;
+  }
+  const devHost = Constants.expoConfig?.hostUri?.split(':')[0] ?? 'localhost';
+  return `http://${devHost}:8000`;
+};
+
+export const BASE_URL = getBaseUrl();
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -208,9 +216,16 @@ export const api = {
     request<void>('/api/rolls/clear/', { method: 'DELETE' }, token),
 
   // Dice
-  analyzeDice: (imageUri: string) => {
+  analyzeDice: async (imageUri: string) => {
     const form = new FormData();
-    form.append('image', { uri: imageUri, name: 'dice.jpg', type: 'image/jpeg' } as unknown as Blob);
+    if (Platform.OS === 'web') {
+      // On web, expo-camera returns a data: URL; convert to Blob before sending
+      const res = await fetch(imageUri);
+      const blob = await res.blob();
+      form.append('image', blob, 'dice.jpg');
+    } else {
+      form.append('image', { uri: imageUri, name: 'dice.jpg', type: 'image/jpeg' } as unknown as Blob);
+    }
     return fetch(`${BASE_URL}/analyze/`, { method: 'POST', body: form }).then(r => r.json());
   },
 };
