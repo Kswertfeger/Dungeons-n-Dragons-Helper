@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -43,33 +44,34 @@ export default function DashboardScreen() {
   );
 
   const handleDelete = (character: Character) => {
-    Alert.alert(
-      'Delete Character',
-      `Are you sure you want to delete ${character.name}?`,
-      [
+    const doDelete = async () => {
+      if (!token) return;
+      try {
+        await api.deleteCharacter(token, character.id);
+        setCharacters((prev) => prev.filter((c) => c.id !== character.id));
+      } catch {
+        setToast('Failed to delete character.');
+      }
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Are you sure you want to delete ${character.name}?`)) doDelete();
+    } else {
+      Alert.alert('Delete Character', `Are you sure you want to delete ${character.name}?`, [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (!token) return;
-            try {
-              await api.deleteCharacter(token, character.id);
-              setCharacters((prev) => prev.filter((c) => c.id !== character.id));
-            } catch {
-              setToast('Failed to delete character.');
-            }
-          },
-        },
-      ],
-    );
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: logout },
-    ]);
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to log out?')) logout();
+    } else {
+      Alert.alert('Logout', 'Are you sure you want to log out?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout', style: 'destructive', onPress: logout },
+      ]);
+    }
   };
 
   // Build list data: characters + create card sentinel
