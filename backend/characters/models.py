@@ -25,6 +25,8 @@ class Character(models.Model):
     wisdom = models.IntegerField(default=10)
     charisma = models.IntegerField(default=10)
 
+    proficient_skills = models.JSONField(default=list, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -33,7 +35,13 @@ class Character(models.Model):
 
     @property
     def armor_class(self):
-        return 10 + (self.dexterity - 10) // 2
+        base = 10 + (self.dexterity - 10) // 2
+        equipped_bonus = sum(
+            item.armor_class_bonus
+            for item in self.inventory.all()
+            if item.equipped
+        )
+        return base + equipped_bonus
 
     @property
     def strength_modifier(self):
@@ -69,6 +77,7 @@ class Spell(models.Model):
     components = models.CharField(max_length=100, default='V, S')
     duration = models.CharField(max_length=50, default='Instantaneous')
     description = models.TextField(blank=True, default='')
+    requires_concentration = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -93,12 +102,41 @@ class SpellSlot(models.Model):
         return f"Level {self.slot_level} slots ({self.remaining}/{self.total})"
 
 
+ITEM_TYPE_CHOICES = [
+    ('weapon', 'Weapon'),
+    ('armor', 'Armor'),
+    ('shield', 'Shield'),
+    ('other', 'Other'),
+]
+
+DAMAGE_TYPE_CHOICES = [
+    ('slashing', 'Slashing'),
+    ('piercing', 'Piercing'),
+    ('bludgeoning', 'Bludgeoning'),
+    ('fire', 'Fire'),
+    ('cold', 'Cold'),
+    ('lightning', 'Lightning'),
+    ('poison', 'Poison'),
+    ('acid', 'Acid'),
+    ('thunder', 'Thunder'),
+    ('necrotic', 'Necrotic'),
+    ('radiant', 'Radiant'),
+    ('force', 'Force'),
+    ('psychic', 'Psychic'),
+]
+
+
 class InventoryItem(models.Model):
     character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='inventory')
     name = models.CharField(max_length=100)
+    item_type = models.CharField(max_length=20, choices=ITEM_TYPE_CHOICES, default='other')
     weight = models.FloatField(default=0.0)
     quantity = models.IntegerField(default=1)
     equipped = models.BooleanField(default=False)
+    armor_class_bonus = models.IntegerField(default=0)
+    damage_dice = models.CharField(max_length=20, blank=True, default='')
+    damage_type = models.CharField(max_length=20, choices=DAMAGE_TYPE_CHOICES, blank=True, default='')
+    damage_bonus = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -128,6 +166,7 @@ class RollHistory(models.Model):
     base_roll = models.IntegerField()
     modifier = models.IntegerField(default=0)
     total = models.IntegerField()
+    note = models.CharField(max_length=200, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

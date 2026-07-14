@@ -4,6 +4,7 @@ import { StatBlock } from '@/components/stat-block';
 import { TabSwitcher } from '@/components/tab-switcher';
 import { Toast } from '@/components/toast';
 import { DnDColors } from '@/constants/colors';
+import { CLASSES } from '@/constants/dnd-data';
 import { useAuth } from '@/context/auth-context';
 import { api, type Character } from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -11,10 +12,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -52,6 +55,7 @@ export default function CharacterSheetScreen() {
   const [activeTab, setActiveTab] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Character>>({});
+  const [showLevelUp, setShowLevelUp] = useState(false);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -64,11 +68,23 @@ export default function CharacterSheetScreen() {
       .finally(() => setLoading(false));
   }, [token, id]);
 
+  const proficiencyBonus = character ? Math.floor((character.level - 1) / 4) + 2 : 2;
+
   const setField = (key: keyof Character) => (val: string) =>
     setEditForm((prev) => ({ ...prev, [key]: val }));
 
   const setNumField = (key: keyof Character) => (val: string) =>
     setEditForm((prev) => ({ ...prev, [key]: parseInt(val) || 0 }));
+
+  const handleToggleProficiency = async (skillName: string) => {
+    if (!token || !character) return;
+    const current = character.proficient_skills ?? [];
+    const updated = current.includes(skillName)
+      ? current.filter((s) => s !== skillName)
+      : [...current, skillName];
+    const newChar = await api.updateCharacter(token, character.id, { proficient_skills: updated } as any);
+    setCharacter(newChar);
+  };
 
   const handleSave = async () => {
     if (!token || !character) return;
@@ -102,7 +118,10 @@ export default function CharacterSheetScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')}
+          style={styles.backBtn}
+        >
           <MaterialIcons name="arrow-back" size={20} color={DnDColors.text} />
         </Pressable>
         <View style={styles.headerCenter}>
@@ -115,10 +134,18 @@ export default function CharacterSheetScreen() {
           {editing ? (
             <PrimaryButton label="Save" onPress={handleSave} loading={saving} style={styles.editBtn} />
           ) : (
-            <Pressable onPress={() => setEditing(true)} style={styles.editBtnOutline}>
-              <MaterialIcons name="edit" size={14} color={DnDColors.accentLight} />
-              <Text style={styles.editBtnText}>Edit</Text>
-            </Pressable>
+            <>
+              {character.level < 20 && (
+                <Pressable onPress={() => setShowLevelUp(true)} style={styles.levelUpBtn}>
+                  <MaterialIcons name="arrow-upward" size={12} color={DnDColors.success} />
+                  <Text style={styles.levelUpBtnText}>Level Up</Text>
+                </Pressable>
+              )}
+              <Pressable onPress={() => setEditing(true)} style={styles.editBtnOutline}>
+                <MaterialIcons name="edit" size={14} color={DnDColors.accentLight} />
+                <Text style={styles.editBtnText}>Edit</Text>
+              </Pressable>
+            </>
           )}
         </View>
       </View>
@@ -147,7 +174,13 @@ export default function CharacterSheetScreen() {
         {activeTab === 0 && (
           <StatsTab character={character} editing={editing} editForm={editForm} setField={setField} setNumField={setNumField} />
         )}
-        {activeTab === 1 && <SkillsTab character={character} mod={mod} />}
+        {activeTab === 1 && (
+          <SkillsTab
+            character={character}
+            proficiencyBonus={proficiencyBonus}
+            onToggleProficiency={handleToggleProficiency}
+          />
+        )}
         {activeTab === 2 && (
           <CombatTab
             character={character}
@@ -161,7 +194,150 @@ export default function CharacterSheetScreen() {
       </ScrollView>
 
       <Toast message={toast} onHide={() => setToast(null)} />
+
+      <LevelUpModal
+        character={character}
+        token={token!}
+        visible={showLevelUp}
+        onClose={() => setShowLevelUp(false)}
+        onSuccess={(updated) => {
+          setCharacter(updated);
+          setEditForm(updated);
+          setToast(`Leveled up to ${updated.level}!`);
+        }}
+      />
     </SafeAreaView>
+  );
+}
+
+// ─── Level Up Modal ───────────────────────────────────────────────────────────
+
+function LevelUpModal({ character, token, visible, onClose, onSuccess }: {
+  character: Character;
+  token: string;
+  visible: boolean;
+  onClose: () => void;
+  onSuccess: (updated: Character) => void;
+}) {
+  const [mode, setMode] = useState<'roll' | 'manual'>('roll');
+  const [rolledHp, setRolledHp] = useState<number | null>(null);
+  const [manualInput, setManualInput] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setMode('roll');
+      setRolledHp(null);
+      setManualInput('');
+    }
+  }, [visible]);
+
+  const hitDie = CLASSES.find((c) => c.name === character.character_class)?.hitDie ?? 8;
+  const newLevel = character.level + 1;
+  const newProfBonus = Math.floor((newLevel - 1) / 4) + 2;
+  const conMod = character.constitution_modifier;
+  const conModStr = conMod >= 0 ? `+${conMod}` : `${conMod}`;
+
+  const handleRoll = () => {
+    const rolled = Math.ceil(Math.random() * hitDie);
+    setRolledHp(Math.max(1, rolled + conMod));
+  };
+
+  const hpGain = mode === 'roll' ? (rolledHp ?? 0) : (parseInt(manualInput) || 0);
+  const canConfirm = mode === 'roll' ? rolledHp !== null : parseInt(manualInput) > 0;
+
+  const handleConfirm = async () => {
+    if (!canConfirm) return;
+    setLoading(true);
+    try {
+      const updated = await api.updateCharacter(token, character.id, {
+        level: newLevel,
+        hp_max: character.hp_max + hpGain,
+        hp_current: character.hp_current + hpGain,
+      });
+      onSuccess(updated);
+      onClose();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.luOverlay}>
+        <View style={styles.luCard}>
+          <View style={styles.luHeader}>
+            <Text style={styles.luTitle}>Level Up!</Text>
+            <Pressable onPress={onClose} style={styles.luClose}>
+              <MaterialIcons name="close" size={20} color={DnDColors.textMuted} />
+            </Pressable>
+          </View>
+
+          <Text style={styles.luLevelText}>
+            Level {character.level} → {newLevel}
+          </Text>
+          <Text style={styles.luInfoText}>
+            Roll 1d{hitDie} + CON ({conModStr}) for HP
+          </Text>
+          <Text style={styles.luInfoText}>
+            Proficiency bonus is now +{newProfBonus}
+          </Text>
+
+          <View style={styles.luModeRow}>
+            <Pressable
+              onPress={() => setMode('roll')}
+              style={[styles.luModeTab, mode === 'roll' && styles.luModeTabActive]}
+            >
+              <Text style={[styles.luModeText, mode === 'roll' && styles.luModeTextActive]}>
+                Roll for HP
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setMode('manual')}
+              style={[styles.luModeTab, mode === 'manual' && styles.luModeTabActive]}
+            >
+              <Text style={[styles.luModeText, mode === 'manual' && styles.luModeTextActive]}>
+                Manual Entry
+              </Text>
+            </Pressable>
+          </View>
+
+          {mode === 'roll' ? (
+            <View style={styles.luRollSection}>
+              {rolledHp !== null && (
+                <Text style={styles.luRolledHp}>+{rolledHp} HP</Text>
+              )}
+              <Pressable onPress={handleRoll} style={styles.luRollBtn}>
+                <MaterialIcons name="casino" size={16} color={DnDColors.accent} />
+                <Text style={styles.luRollBtnText}>
+                  {rolledHp !== null ? 'Re-roll' : 'Roll HP'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.luManualSection}>
+              <Text style={styles.luManualLabel}>HP Gained</Text>
+              <TextInput
+                style={styles.luManualInput}
+                value={manualInput}
+                onChangeText={setManualInput}
+                keyboardType="numeric"
+                placeholder="e.g. 6"
+                placeholderTextColor={DnDColors.textDisabled}
+              />
+            </View>
+          )}
+
+          <PrimaryButton
+            label="Confirm Level Up"
+            onPress={handleConfirm}
+            loading={loading}
+            disabled={!canConfirm}
+            style={styles.luConfirmBtn}
+          />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -249,21 +425,34 @@ function StatsTab({ character, editing, editForm, setField, setNumField }: {
 
 // ─── Skills Tab ───────────────────────────────────────────────────────────────
 
-function SkillsTab({ character, mod }: { character: Character; mod: (v: number) => string }) {
+function SkillsTab({ character, proficiencyBonus, onToggleProficiency }: {
+  character: Character;
+  proficiencyBonus: number;
+  onToggleProficiency: (skillName: string) => void;
+}) {
+  const proficient = character.proficient_skills ?? [];
   return (
-    <SectionCard title="Skills">
-      {SKILLS.map((skill) => {
-        const val = character[skill.stat] as number;
-        const label = val >= 0 ? `+${val}` : `${val}`;
-        return (
-          <View key={skill.name} style={styles.skillRow}>
-            <View style={styles.skillDot} />
-            <Text style={styles.skillName}>{skill.name}</Text>
-            <Text style={styles.skillMod}>{label}</Text>
-          </View>
-        );
-      })}
-    </SectionCard>
+    <>
+      <View style={styles.profBonusRow}>
+        <Text style={styles.profBonusLabel}>Proficiency Bonus</Text>
+        <Text style={styles.profBonusValue}>+{proficiencyBonus}</Text>
+      </View>
+      <SectionCard title="Skills  ·  tap dot to toggle proficiency">
+        {SKILLS.map((skill) => {
+          const baseVal = character[skill.stat] as number;
+          const isProficient = proficient.includes(skill.name);
+          const total = isProficient ? baseVal + proficiencyBonus : baseVal;
+          const label = total >= 0 ? `+${total}` : `${total}`;
+          return (
+            <Pressable key={skill.name} style={styles.skillRow} onPress={() => onToggleProficiency(skill.name)}>
+              <View style={[styles.skillDot, isProficient && styles.skillDotFilled]} />
+              <Text style={styles.skillName}>{skill.name}</Text>
+              <Text style={[styles.skillMod, isProficient && styles.skillModProficient]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </SectionCard>
+    </>
   );
 }
 
@@ -278,6 +467,7 @@ function CombatTab({ character, editing, editForm, setNumField, token, onHpChang
   onHpChange: (c: Character) => void;
 }) {
   const [hpLoading, setHpLoading] = useState(false);
+  const [hpInput, setHpInput] = useState('');
 
   const adjustHp = async (delta: number) => {
     const newHp = Math.max(0, Math.min(character.hp_max, character.hp_current + delta));
@@ -291,8 +481,16 @@ function CombatTab({ character, editing, editForm, setNumField, token, onHpChang
     }
   };
 
+  const applyHpChange = async (type: 'damage' | 'heal') => {
+    const amount = parseInt(hpInput) || 0;
+    if (amount <= 0) return;
+    await adjustHp(type === 'damage' ? -amount : amount);
+    setHpInput('');
+  };
+
   const hpPercent = character.hp_max > 0 ? character.hp_current / character.hp_max : 0;
   const hpColor = hpPercent > 0.5 ? DnDColors.success : hpPercent > 0.25 ? DnDColors.warning : DnDColors.danger;
+  const passivePerception = 10 + character.wisdom_modifier;
 
   return (
     <>
@@ -313,6 +511,33 @@ function CombatTab({ character, editing, editForm, setNumField, token, onHpChang
             <Text style={styles.hpBtnText}>+</Text>
           </Pressable>
         </View>
+
+        <View style={styles.hpBulkRow}>
+          <Pressable
+            onPress={() => applyHpChange('damage')}
+            style={[styles.hpActionBtn, styles.damageBtn]}
+            disabled={hpLoading}
+          >
+            <Text style={styles.hpActionText}>Damage</Text>
+          </Pressable>
+          <TextInput
+            style={styles.hpBulkInput}
+            value={hpInput}
+            onChangeText={setHpInput}
+            keyboardType="numeric"
+            placeholder="0"
+            placeholderTextColor={DnDColors.textDisabled}
+            maxLength={4}
+          />
+          <Pressable
+            onPress={() => applyHpChange('heal')}
+            style={[styles.hpActionBtn, styles.healBtn]}
+            disabled={hpLoading}
+          >
+            <Text style={styles.hpActionText}>Heal</Text>
+          </Pressable>
+        </View>
+
         {editing && (
           <InputField
             label="Max HP"
@@ -329,6 +554,13 @@ function CombatTab({ character, editing, editForm, setNumField, token, onHpChang
         <CombatStat label="Initiative" value={character.dexterity_modifier >= 0 ? `+${character.dexterity_modifier}` : `${character.dexterity_modifier}`} />
         <CombatStat label="Speed" value="30 ft" />
       </View>
+
+      <SectionCard title="Senses">
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Passive Perception</Text>
+          <Text style={styles.infoValue}>{passivePerception}</Text>
+        </View>
+      </SectionCard>
     </>
   );
 }
@@ -374,7 +606,7 @@ const styles = StyleSheet.create({
   headerCenter: { flex: 1 },
   charName: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
   charMeta: { color: DnDColors.textMuted, fontSize: 12, marginTop: 1 },
-  headerActions: { minWidth: 70, alignItems: 'flex-end' },
+  headerActions: { alignItems: 'flex-end', gap: 6, flexDirection: 'row' },
   editBtn: { paddingVertical: 6, paddingHorizontal: 14 },
   editBtnOutline: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -426,12 +658,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingVertical: 6,
     borderBottomWidth: 1, borderBottomColor: DnDColors.border + '60',
   },
+  profBonusRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: DnDColors.surface, borderRadius: 10,
+    paddingHorizontal: 16, paddingVertical: 10, marginBottom: 10,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  profBonusLabel: { color: DnDColors.textMuted, fontSize: 13 },
+  profBonusValue: { color: DnDColors.accentLight, fontSize: 16, fontWeight: '700' },
   skillDot: {
-    width: 8, height: 8, borderRadius: 4,
-    borderWidth: 1, borderColor: DnDColors.textMuted, marginRight: 10,
+    width: 10, height: 10, borderRadius: 5,
+    borderWidth: 1.5, borderColor: DnDColors.textMuted, marginRight: 10,
+  },
+  skillDotFilled: {
+    backgroundColor: DnDColors.accentLight,
+    borderColor: DnDColors.accentLight,
   },
   skillName: { color: DnDColors.textMuted, fontSize: 13, flex: 1 },
   skillMod: { color: DnDColors.accentLight, fontSize: 13, fontWeight: '600' },
+  skillModProficient: { color: DnDColors.success },
   hpRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   hpBtn: {
     backgroundColor: DnDColors.surfaceRaised, width: 36, height: 36,
@@ -446,6 +691,21 @@ const styles = StyleSheet.create({
     borderRadius: 3, marginTop: 8, overflow: 'hidden',
   },
   hpBarFill: { height: '100%', borderRadius: 3 },
+  hpBulkRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12,
+  },
+  hpBulkInput: {
+    flex: 1, backgroundColor: DnDColors.surfaceRaised,
+    borderRadius: 8, borderWidth: 1, borderColor: DnDColors.border,
+    color: DnDColors.text, fontSize: 16, fontWeight: '600',
+    textAlign: 'center', paddingVertical: 8,
+  },
+  hpActionBtn: {
+    flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center',
+  },
+  damageBtn: { backgroundColor: DnDColors.danger + 'CC' },
+  healBtn: { backgroundColor: DnDColors.success + 'CC' },
+  hpActionText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   combatStats: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   combatStatBox: {
     flex: 1, backgroundColor: DnDColors.surface, borderRadius: 12,
@@ -454,4 +714,64 @@ const styles = StyleSheet.create({
   },
   combatStatValue: { color: DnDColors.text, fontSize: 22, fontWeight: '700' },
   combatStatLabel: { color: DnDColors.textMuted, fontSize: 11, marginTop: 4 },
+
+  // Level Up button (header)
+  levelUpBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8,
+    borderWidth: 1, borderColor: DnDColors.success + '66',
+    backgroundColor: DnDColors.success + '11',
+  },
+  levelUpBtnText: { color: DnDColors.success, fontSize: 11, fontWeight: '700' },
+
+  // Level Up modal
+  luOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end',
+  },
+  luCard: {
+    backgroundColor: DnDColors.surface,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, maxHeight: '70%',
+  },
+  luHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
+  },
+  luTitle: { color: DnDColors.text, fontSize: 20, fontWeight: '800' },
+  luClose: { padding: 4 },
+  luLevelText: {
+    color: DnDColors.accentLight, fontSize: 26, fontWeight: '800', textAlign: 'center', marginBottom: 8,
+  },
+  luInfoText: {
+    color: DnDColors.textMuted, fontSize: 14, textAlign: 'center', marginBottom: 4,
+  },
+  luModeRow: {
+    flexDirection: 'row', backgroundColor: DnDColors.surfaceRaised,
+    borderRadius: 10, padding: 3, marginTop: 16, marginBottom: 16,
+  },
+  luModeTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+  luModeTabActive: { backgroundColor: DnDColors.accent },
+  luModeText: { color: DnDColors.textMuted, fontSize: 13, fontWeight: '600' },
+  luModeTextActive: { color: '#fff' },
+  luRollSection: { alignItems: 'center', marginBottom: 16 },
+  luRolledHp: {
+    color: DnDColors.success, fontSize: 36, fontWeight: '800', marginBottom: 12,
+  },
+  luRollBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 24, paddingVertical: 12,
+    borderRadius: 8, borderWidth: 1, borderColor: DnDColors.accent,
+  },
+  luRollBtnText: { color: DnDColors.accentLight, fontSize: 15, fontWeight: '600' },
+  luManualSection: { marginBottom: 16 },
+  luManualLabel: {
+    color: DnDColors.textMuted, fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  luManualInput: {
+    backgroundColor: DnDColors.surfaceRaised,
+    borderWidth: 1, borderColor: DnDColors.border,
+    borderRadius: 8, paddingVertical: 12, paddingHorizontal: 14,
+    color: DnDColors.text, fontSize: 18, fontWeight: '700', textAlign: 'center',
+  },
+  luConfirmBtn: { marginTop: 4 },
 });

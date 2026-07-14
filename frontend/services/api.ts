@@ -41,6 +41,7 @@ export type Character = {
   intelligence_modifier: number;
   wisdom_modifier: number;
   charisma_modifier: number;
+  proficient_skills: string[];
   created_at: string;
   updated_at: string;
 };
@@ -54,6 +55,7 @@ export type Spell = {
   components: string;
   duration: string;
   description: string;
+  requires_concentration: boolean;
   created_at: string;
 };
 
@@ -65,12 +67,24 @@ export type SpellSlot = {
   remaining: number;
 };
 
+export type ItemType = 'weapon' | 'armor' | 'shield' | 'other';
+
+export type DamageType =
+  | 'slashing' | 'piercing' | 'bludgeoning'
+  | 'fire' | 'cold' | 'lightning' | 'poison' | 'acid' | 'thunder'
+  | 'necrotic' | 'radiant' | 'force' | 'psychic' | '';
+
 export type InventoryItem = {
   id: number;
   name: string;
+  item_type: ItemType;
   weight: number;
   quantity: number;
   equipped: boolean;
+  armor_class_bonus: number;
+  damage_dice: string;
+  damage_type: DamageType;
+  damage_bonus: number;
   created_at: string;
 };
 
@@ -82,6 +96,7 @@ export type RollHistory = {
   base_roll: number;
   modifier: number;
   total: number;
+  note: string;
   created_at: string;
 };
 

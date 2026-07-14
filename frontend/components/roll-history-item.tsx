@@ -29,6 +29,7 @@ export function RollHistoryItem({ roll }: Props) {
         <Text style={styles.meta}>
           {roll.num_dice}{roll.dice_type}  ·  {dateStr} {timeStr}
         </Text>
+        {roll.note ? <Text style={styles.note}>{roll.note}</Text> : null}
       </View>
     </View>
   );
@@ -96,5 +97,11 @@ const styles = StyleSheet.create({
   meta: {
     color: DnDColors.textDisabled,
     fontSize: 11,
+  },
+  note: {
+    color: DnDColors.textMuted,
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 3,
   },
 });

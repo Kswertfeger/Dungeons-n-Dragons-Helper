@@ -4,7 +4,7 @@ import { PrimaryButton } from '@/components/primary-button';
 import { Toast } from '@/components/toast';
 import { DnDColors } from '@/constants/colors';
 import { useAuth } from '@/context/auth-context';
-import { api, type InventoryItem } from '@/services/api';
+import { api, type Character, type DamageType, type InventoryItem, type ItemType } from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -27,37 +27,53 @@ export default function InventoryScreen() {
   const charId = parseInt(id);
 
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [character, setCharacter] = useState<Character | null>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const [form, setForm] = useState({
-    name: '', weight: '0', quantity: '1', equipped: false,
+    name: '', item_type: 'other' as ItemType, weight: '0', quantity: '1',
+    equipped: false, armor_class_bonus: '0',
+    damage_dice: '', damage_type: '' as DamageType, damage_bonus: '0',
   });
 
   const load = useCallback(async () => {
     if (!token) return;
-    const data = await api.getInventory(token, charId);
+    const [data, char] = await Promise.all([
+      api.getInventory(token, charId),
+      api.getCharacter(token, charId),
+    ]);
     setItems(data);
+    setCharacter(char);
     setLoading(false);
   }, [token, charId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const totalWeight = items.reduce((sum, i) => sum + i.weight * i.quantity, 0).toFixed(1);
+  const totalWeightNum = items.reduce((sum, i) => sum + i.weight * i.quantity, 0);
+  const totalWeight = totalWeightNum.toFixed(1);
+  const carryCapacity = character ? character.strength * 15 : 0;
+  const weightPercent = carryCapacity > 0 ? Math.min(totalWeightNum / carryCapacity, 1) : 0;
+  const weightColor = weightPercent > 0.9 ? DnDColors.danger : weightPercent > 0.66 ? '#E67E22' : DnDColors.success;
 
   const handleAddItem = async () => {
     if (!form.name.trim() || !token) return;
     try {
       const item = await api.addItem(token, charId, {
         name: form.name.trim(),
+        item_type: form.item_type,
         weight: parseFloat(form.weight) || 0,
         quantity: parseInt(form.quantity) || 1,
         equipped: form.equipped,
+        armor_class_bonus: parseInt(form.armor_class_bonus) || 0,
+        damage_dice: form.damage_dice.trim(),
+        damage_type: form.damage_type,
+        damage_bonus: parseInt(form.damage_bonus) || 0,
       });
       setItems((prev) => [...prev, item]);
       setShowModal(false);
-      setForm({ name: '', weight: '0', quantity: '1', equipped: false });
+      setForm({ name: '', item_type: 'other', weight: '0', quantity: '1', equipped: false, armor_class_bonus: '0', damage_dice: '', damage_type: '', damage_bonus: '0' });
       setToast('Item added!');
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Failed to add item.');
@@ -68,6 +84,12 @@ export default function InventoryScreen() {
     const newQty = Math.max(1, item.quantity + delta);
     if (newQty === item.quantity || !token) return;
     const updated = await api.updateItem(token, charId, item.id, { quantity: newQty });
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+  };
+
+  const handleEquip = async (item: InventoryItem) => {
+    if (!token) return;
+    const updated = await api.updateItem(token, charId, item.id, { equipped: !item.equipped });
     setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
   };
 
@@ -91,12 +113,20 @@ export default function InventoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace(`/character/${id}`)}
+          style={styles.backBtn}
+        >
           <MaterialIcons name="arrow-back" size={20} color={DnDColors.text} />
         </Pressable>
         <View style={styles.titleBlock}>
           <Text style={styles.title}>Inventory</Text>
-          <Text style={styles.weight}>Total Weight: {totalWeight} lbs</Text>
+          <Text style={styles.weight}>
+            {totalWeight} / {carryCapacity} lbs
+          </Text>
+          <View style={styles.weightBarBg}>
+            <View style={[styles.weightBarFill, { width: `${weightPercent * 100}%` as any, backgroundColor: weightColor }]} />
+          </View>
         </View>
         <Pressable onPress={() => setShowModal(true)} style={styles.addBtn}>
           <MaterialIcons name="add" size={16} color="#fff" />
@@ -118,6 +148,7 @@ export default function InventoryScreen() {
                   onIncrease={() => handleUpdateQty(item, 1)}
                   onDecrease={() => handleUpdateQty(item, -1)}
                   onDelete={() => handleDelete(item)}
+                  onEquip={() => handleEquip(item)}
                 />
               ))}
             </View>
@@ -132,6 +163,7 @@ export default function InventoryScreen() {
                 onIncrease={() => handleUpdateQty(item, 1)}
                 onDecrease={() => handleUpdateQty(item, -1)}
                 onDelete={() => handleDelete(item)}
+                onEquip={() => handleEquip(item)}
               />
             ))}
             {stored.length === 0 && equipped.length === 0 && (
@@ -157,6 +189,22 @@ export default function InventoryScreen() {
               onChangeText={(v) => setForm((p) => ({ ...p, name: v }))}
               placeholder="e.g. Longsword"
             />
+
+            <Text style={styles.pickerLabel}>Type</Text>
+            <View style={styles.typeRow}>
+              {(['weapon', 'armor', 'shield', 'other'] as ItemType[]).map((t) => (
+                <Pressable
+                  key={t}
+                  onPress={() => setForm((p) => ({ ...p, item_type: t }))}
+                  style={[styles.typeChip, form.item_type === t && styles.typeChipActive]}
+                >
+                  <Text style={[styles.typeChipText, form.item_type === t && styles.typeChipTextActive]}>
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
             <View style={styles.row}>
               <View style={styles.half}>
                 <InputField
@@ -177,6 +225,55 @@ export default function InventoryScreen() {
                 />
               </View>
             </View>
+
+            {(form.item_type === 'armor' || form.item_type === 'shield') && (
+              <InputField
+                label="AC Bonus"
+                value={form.armor_class_bonus}
+                onChangeText={(v) => setForm((p) => ({ ...p, armor_class_bonus: v }))}
+                keyboardType="numeric"
+                placeholder="0"
+              />
+            )}
+
+            {form.item_type === 'weapon' && (
+              <>
+                <View style={styles.row}>
+                  <View style={styles.half}>
+                    <InputField
+                      label="Damage Dice"
+                      value={form.damage_dice}
+                      onChangeText={(v) => setForm((p) => ({ ...p, damage_dice: v }))}
+                      placeholder="e.g. 1d8"
+                    />
+                  </View>
+                  <View style={styles.half}>
+                    <InputField
+                      label="Magic Bonus"
+                      value={form.damage_bonus}
+                      onChangeText={(v) => setForm((p) => ({ ...p, damage_bonus: v }))}
+                      keyboardType="numeric"
+                      placeholder="0"
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.pickerLabel}>Damage Type</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.damageTypeScroll}>
+                  {(['slashing', 'piercing', 'bludgeoning', 'fire', 'cold', 'lightning', 'poison', 'acid', 'thunder', 'necrotic', 'radiant', 'force', 'psychic'] as DamageType[]).map((dt) => (
+                    <Pressable
+                      key={dt}
+                      onPress={() => setForm((p) => ({ ...p, damage_type: p.damage_type === dt ? '' : dt }))}
+                      style={[styles.typeChip, form.damage_type === dt && styles.typeChipActive]}
+                    >
+                      <Text style={[styles.typeChipText, form.damage_type === dt && styles.typeChipTextActive]}>
+                        {dt.charAt(0).toUpperCase() + dt.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
 
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Equipped</Text>
@@ -209,6 +306,11 @@ const styles = StyleSheet.create({
   titleBlock: { flex: 1 },
   title: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
   weight: { color: DnDColors.textMuted, fontSize: 11, marginTop: 1 },
+  weightBarBg: {
+    height: 4, width: '100%', backgroundColor: DnDColors.surfaceRaised,
+    borderRadius: 2, marginTop: 4, overflow: 'hidden',
+  },
+  weightBarFill: { height: '100%', borderRadius: 2 },
   addBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: DnDColors.accent, borderRadius: 8,
@@ -237,6 +339,20 @@ const styles = StyleSheet.create({
   modalTitle: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
   row: { flexDirection: 'row', gap: 12 },
   half: { flex: 1 },
+  pickerLabel: {
+    color: DnDColors.textMuted, fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  typeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  damageTypeScroll: { marginBottom: 12 },
+  typeChip: {
+    flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center',
+    backgroundColor: DnDColors.surfaceRaised,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  typeChipActive: { backgroundColor: DnDColors.accent, borderColor: DnDColors.accent },
+  typeChipText: { color: DnDColors.textMuted, fontSize: 13 },
+  typeChipTextActive: { color: '#fff', fontWeight: '600' },
   switchRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', paddingVertical: 8,

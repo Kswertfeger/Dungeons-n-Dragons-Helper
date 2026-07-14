@@ -1,5 +1,6 @@
 inference-sdk>=0.9
 python-dotenv>=1.0
+psycopg2-binary>=2.9
 absl-py==2.4.0
 Pillow>=10.0.0
 asgiref==3.11.1

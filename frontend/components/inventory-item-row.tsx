@@ -9,19 +9,43 @@ type Props = {
   onIncrease: () => void;
   onDecrease: () => void;
   onDelete: () => void;
+  onEquip: () => void;
 };
 
-export function InventoryItemRow({ item, onIncrease, onDecrease, onDelete }: Props) {
+export function InventoryItemRow({ item, onIncrease, onDecrease, onDelete, onEquip }: Props) {
   return (
     <View style={styles.row}>
       <View style={styles.info}>
-        <Text style={styles.name}>{item.name}</Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.name}>{item.name}</Text>
+          {item.armor_class_bonus !== 0 && (
+            <View style={styles.acBadge}>
+              <Text style={styles.acBadgeText}>
+                AC {item.armor_class_bonus > 0 ? `+${item.armor_class_bonus}` : item.armor_class_bonus}
+              </Text>
+            </View>
+          )}
+        </View>
+        {item.item_type === 'weapon' && item.damage_dice ? (
+          <Text style={styles.damage}>
+            {item.damage_dice}
+            {item.damage_bonus !== 0 ? (item.damage_bonus > 0 ? `+${item.damage_bonus}` : item.damage_bonus) : ''}
+            {item.damage_type ? ` · ${item.damage_type}` : ''}
+          </Text>
+        ) : null}
         <Text style={styles.weight}>
-          Weight: {item.weight} × {item.quantity} = {(item.weight * item.quantity).toFixed(1)} lbs
+          {item.weight > 0 ? `${item.weight} × ${item.quantity} = ${(item.weight * item.quantity).toFixed(1)} lbs` : ''}
         </Text>
       </View>
 
       <View style={styles.controls}>
+        <Pressable onPress={onEquip} style={styles.equipBtn} hitSlop={4}>
+          <MaterialIcons
+            name="shield"
+            size={18}
+            color={item.equipped ? DnDColors.accentLight : DnDColors.textDisabled}
+          />
+        </Pressable>
         <Pressable onPress={onDecrease} style={styles.stepper} hitSlop={4}>
           <Text style={styles.stepperText}>−</Text>
         </Pressable>
@@ -53,15 +77,39 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   name: {
     color: DnDColors.text,
     fontSize: 15,
     fontWeight: '600',
   },
+  acBadge: {
+    backgroundColor: DnDColors.accent + '33',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: DnDColors.accentLight + '88',
+  },
+  acBadgeText: {
+    color: DnDColors.accentLight,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  damage: {
+    color: DnDColors.danger,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   weight: {
     color: DnDColors.textMuted,
     fontSize: 12,
-    marginTop: 2,
+    marginTop: 1,
   },
   controls: {
     flexDirection: 'row',
@@ -88,6 +136,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     minWidth: 24,
     textAlign: 'center',
+  },
+  equipBtn: {
+    marginRight: 4,
   },
   deleteBtn: {
     marginLeft: 4,

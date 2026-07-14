@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -37,6 +38,7 @@ export default function DiceScannerScreen() {
   const [diceType, setDiceType] = useState<string>('d20');
   const [numDice, setNumDice] = useState(1);
   const [modifier, setModifier] = useState(0);
+  const [note, setNote] = useState('');
 
   const cameraRef = useRef<CameraView>(null);
 
@@ -73,6 +75,7 @@ export default function DiceScannerScreen() {
           base_roll: data.total,
           modifier,
           total: data.total + modifier,
+          note: note.trim(),
         }).catch(() => {});
       }
     } catch (e: unknown) {
@@ -94,7 +97,7 @@ export default function DiceScannerScreen() {
     if (token) {
       api.saveRoll(token, {
         roll_type: rollType, dice_type: diceType, num_dice: numDice,
-        base_roll: base, modifier, total,
+        base_roll: base, modifier, total, note: note.trim(),
       }).catch(() => {});
     }
   };
@@ -189,6 +192,16 @@ export default function DiceScannerScreen() {
           </View>
         </View>
 
+        <Text style={styles.configLabel}>Note (optional)</Text>
+        <TextInput
+          style={styles.noteInput}
+          value={note}
+          onChangeText={setNote}
+          placeholder="e.g. Sneak attack, Initiative..."
+          placeholderTextColor={DnDColors.textDisabled}
+          maxLength={100}
+        />
+
         <TouchableOpacity style={styles.rollBtn} onPress={rollDice}>
           <Text style={styles.rollBtnText}>Roll Dice</Text>
         </TouchableOpacity>
@@ -262,6 +275,13 @@ const styles = StyleSheet.create({
   },
   stepBtnText: { color: DnDColors.text, fontSize: 18, fontWeight: '600' },
   stepValue: { color: DnDColors.text, fontSize: 16, fontWeight: '600', flex: 1, textAlign: 'center' },
+  noteInput: {
+    backgroundColor: DnDColors.surfaceRaised,
+    borderRadius: 8, borderWidth: 1, borderColor: DnDColors.border,
+    color: DnDColors.text, fontSize: 14,
+    paddingHorizontal: 12, paddingVertical: 10,
+    marginBottom: 4,
+  },
   rollBtn: {
     backgroundColor: DnDColors.accent, borderRadius: 8, paddingVertical: 14,
     alignItems: 'center', marginTop: 14,
