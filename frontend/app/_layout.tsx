@@ -20,8 +20,9 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       {token ? (
         <>
-          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="index" />
           <Stack.Screen name="character/[id]" />
+          <Stack.Screen name="character/[id]/roll-history" />
           <Stack.Screen
             name="create-character"
             options={{ presentation: 'modal', animation: 'slide_from_bottom' }}

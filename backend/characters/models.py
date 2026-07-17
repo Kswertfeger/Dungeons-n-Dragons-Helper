@@ -68,6 +68,16 @@ class Character(models.Model):
         return (self.charisma - 10) // 2
 
 
+class Profile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    active_character = models.ForeignKey(
+        Character, on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"{self.user.username}'s profile"
+
+
 class Spell(models.Model):
     character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='spells')
     name = models.CharField(max_length=100)
@@ -153,16 +163,24 @@ ROLL_TYPE_CHOICES = [
     ('CUSTOM', 'Custom'),
 ]
 
+ROLL_MODE_CHOICES = [
+    ('normal', 'Normal'),
+    ('advantage', 'Advantage'),
+    ('disadvantage', 'Disadvantage'),
+]
+
 
 class RollHistory(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='roll_history')
     character = models.ForeignKey(
-        Character, on_delete=models.SET_NULL,
-        related_name='roll_history', null=True, blank=True
+        Character, on_delete=models.CASCADE,
+        related_name='roll_history'
     )
     roll_type = models.CharField(max_length=10, choices=ROLL_TYPE_CHOICES, default='CUSTOM')
     dice_type = models.CharField(max_length=10, default='d20')
     num_dice = models.IntegerField(default=1)
+    roll_mode = models.CharField(max_length=15, choices=ROLL_MODE_CHOICES, default='normal')
+    discarded_roll = models.IntegerField(null=True, blank=True)
     base_roll = models.IntegerField()
     modifier = models.IntegerField(default=0)
     total = models.IntegerField()

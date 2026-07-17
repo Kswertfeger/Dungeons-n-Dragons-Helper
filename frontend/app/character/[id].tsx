@@ -1,28 +1,42 @@
+import { CharacterDiceOverlay } from '@/components/character-dice-overlay';
+import { CharacterHeader } from '@/components/character-header';
 import { InputField } from '@/components/input-field';
+import { InventoryItemRow } from '@/components/inventory-item-row';
 import { PrimaryButton } from '@/components/primary-button';
+import { SpellCard } from '@/components/spell-card';
 import { StatBlock } from '@/components/stat-block';
 import { TabSwitcher } from '@/components/tab-switcher';
 import { Toast } from '@/components/toast';
 import { DnDColors } from '@/constants/colors';
 import { CLASSES } from '@/constants/dnd-data';
 import { useAuth } from '@/context/auth-context';
-import { api, type Character } from '@/services/api';
+import {
+  api,
+  type Character,
+  type DamageType,
+  type InventoryItem,
+  type ItemType,
+  type Spell,
+  type SpellSlot,
+} from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const STAT_TABS = ['Stats', 'Skills & Proficiencies', 'Combat'];
+const STAT_TABS = ['Stats', 'Skills', 'Combat', 'Spells', 'Inventory'];
 
 const SKILLS: { name: string; stat: keyof Character }[] = [
   { name: 'Acrobatics', stat: 'dexterity_modifier' },
@@ -116,59 +130,18 @@ export default function CharacterSheetScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')}
-          style={styles.backBtn}
-        >
-          <MaterialIcons name="arrow-back" size={20} color={DnDColors.text} />
-        </Pressable>
-        <View style={styles.headerCenter}>
-          <Text style={styles.charName}>{character.name}</Text>
-          <Text style={styles.charMeta}>
-            Level {character.level} · {character.race} {character.character_class}
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          {editing ? (
-            <PrimaryButton label="Save" onPress={handleSave} loading={saving} style={styles.editBtn} />
-          ) : (
-            <>
-              {character.level < 20 && (
-                <Pressable onPress={() => setShowLevelUp(true)} style={styles.levelUpBtn}>
-                  <MaterialIcons name="arrow-upward" size={12} color={DnDColors.success} />
-                  <Text style={styles.levelUpBtnText}>Level Up</Text>
-                </Pressable>
-              )}
-              <Pressable onPress={() => setEditing(true)} style={styles.editBtnOutline}>
-                <MaterialIcons name="edit" size={14} color={DnDColors.accentLight} />
-                <Text style={styles.editBtnText}>Edit</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      </View>
+      <CharacterHeader
+        character={character}
+        editing={editing}
+        saving={saving}
+        canLevelUp={character.level < 20}
+        onSwitchCharacter={() => router.replace('/')}
+        onEdit={() => setEditing(true)}
+        onSave={handleSave}
+        onLevelUp={() => setShowLevelUp(true)}
+      />
 
-      {/* Sub-nav links to spells/inventory */}
-      <View style={styles.subNav}>
-        <Pressable
-          onPress={() => router.push(`/character/${id}/spells`)}
-          style={styles.subNavBtn}
-        >
-          <MaterialIcons name="auto-fix-high" size={14} color={DnDColors.textMuted} />
-          <Text style={styles.subNavText}>Spells</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => router.push(`/character/${id}/inventory`)}
-          style={styles.subNavBtn}
-        >
-          <MaterialIcons name="inventory" size={14} color={DnDColors.textMuted} />
-          <Text style={styles.subNavText}>Inventory</Text>
-        </Pressable>
-      </View>
-
-      <TabSwitcher tabs={STAT_TABS} activeIndex={activeTab} onChange={setActiveTab} />
+      <TabSwitcher tabs={STAT_TABS} activeIndex={activeTab} onChange={setActiveTab} scrollable />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {activeTab === 0 && (
@@ -191,7 +164,15 @@ export default function CharacterSheetScreen() {
             onHpChange={setCharacter}
           />
         )}
+        {activeTab === 3 && (
+          <SpellsTab charId={character.id} token={token!} />
+        )}
+        {activeTab === 4 && (
+          <InventoryTab charId={character.id} token={token!} character={character} />
+        )}
       </ScrollView>
+
+      <CharacterDiceOverlay character={character} token={token!} characterId={character.id} />
 
       <Toast message={toast} onHide={() => setToast(null)} />
 
@@ -574,6 +555,757 @@ function CombatStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ─── Spells Tab ───────────────────────────────────────────────────────────────
+
+const SPELL_LEVELS = [
+  { label: 'Cantrip', value: 0 },
+  ...Array.from({ length: 9 }, (_, i) => ({ label: `Level ${i + 1}`, value: i + 1 })),
+];
+
+const BLANK_SPELL_FORM = {
+  name: '', level: 0, casting_time: '1 action', range: '30 feet',
+  components: 'V, S', duration: 'Instantaneous', description: '',
+  requires_concentration: false,
+};
+
+function SpellsTab({ charId, token }: { charId: number; token: string }) {
+  const [spells, setSpells] = useState<Spell[]>([]);
+  const [slots, setSlots] = useState<SpellSlot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [showSlotsModal, setShowSlotsModal] = useState(false);
+  const [slotDraft, setSlotDraft] = useState<Record<number, string>>({});
+  const [savingSlots, setSavingSlots] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [activeConcentrationId, setActiveConcentrationId] = useState<number | null>(null);
+  const [form, setForm] = useState(BLANK_SPELL_FORM);
+
+  const load = useCallback(async () => {
+    const [s, sl] = await Promise.all([
+      api.getSpells(token, charId),
+      api.getSpellSlots(token, charId),
+    ]);
+    setSpells(s);
+    setSlots(sl);
+    setLoading(false);
+  }, [token, charId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAddSpell = async () => {
+    if (!form.name.trim()) return;
+    try {
+      const spell = await api.addSpell(token, charId, form);
+      setSpells((prev) => [...prev, spell]);
+      setShowModal(false);
+      setForm(BLANK_SPELL_FORM);
+      setToast('Spell added successfully!');
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Failed to add spell.');
+    }
+  };
+
+  const handleDeleteSpell = (spell: Spell) => {
+    Alert.alert('Remove Spell', `Remove ${spell.name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive',
+        onPress: async () => {
+          await api.deleteSpell(token, charId, spell.id);
+          setSpells((prev) => prev.filter((s) => s.id !== spell.id));
+          if (activeConcentrationId === spell.id) setActiveConcentrationId(null);
+        },
+      },
+    ]);
+  };
+
+  const doCast = async (spell: Spell, slot: SpellSlot) => {
+    try {
+      const updated = await api.updateSpellSlot(token, charId, slot.id, { used: slot.used + 1 });
+      setSlots((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      if (spell.requires_concentration) setActiveConcentrationId(spell.id);
+      setToast(`Cast ${spell.name}!`);
+    } catch {
+      setToast('Failed to cast spell.');
+    }
+  };
+
+  const handleCast = (spell: Spell) => {
+    const availableSlot = slots
+      .filter((s) => s.slot_level >= spell.level && s.remaining > 0)
+      .sort((a, b) => a.slot_level - b.slot_level)[0];
+
+    if (!availableSlot) {
+      setToast('No spell slots remaining!');
+      return;
+    }
+
+    if (spell.requires_concentration && activeConcentrationId && activeConcentrationId !== spell.id) {
+      const current = spells.find((s) => s.id === activeConcentrationId);
+      Alert.alert(
+        'Break Concentration?',
+        `You are concentrating on ${current?.name ?? 'another spell'}. Cast ${spell.name} and break concentration?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Cast', onPress: () => doCast(spell, availableSlot) },
+        ],
+      );
+      return;
+    }
+
+    doCast(spell, availableSlot);
+  };
+
+  const openSlotsModal = () => {
+    const draft: Record<number, string> = {};
+    for (let lvl = 1; lvl <= 9; lvl++) {
+      const existing = slots.find((s) => s.slot_level === lvl);
+      draft[lvl] = existing ? String(existing.total) : '0';
+    }
+    setSlotDraft(draft);
+    setShowSlotsModal(true);
+  };
+
+  const handleSaveSlots = async () => {
+    setSavingSlots(true);
+    try {
+      const ops = Array.from({ length: 9 }, (_, i) => i + 1).map(async (lvl) => {
+        const total = parseInt(slotDraft[lvl]) || 0;
+        const existing = slots.find((s) => s.slot_level === lvl);
+        if (existing) {
+          if (existing.total !== total) {
+            return api.updateSpellSlot(token, charId, existing.id, {
+              total,
+              used: Math.min(existing.used, total),
+            });
+          }
+        } else if (total > 0) {
+          return api.createSpellSlot(token, charId, { slot_level: lvl, total, used: 0 });
+        }
+      });
+      await Promise.all(ops);
+      await load();
+      setShowSlotsModal(false);
+      setToast('Spell slots updated!');
+    } finally {
+      setSavingSlots(false);
+    }
+  };
+
+  const handleLongRest = async () => {
+    if (slots.length === 0) return;
+    await Promise.all(slots.map((s) => api.updateSpellSlot(token, charId, s.id, { used: 0 })));
+    await load();
+    setToast('Long rest taken! Spell slots restored.');
+  };
+
+  if (loading) {
+    return <ActivityIndicator color={DnDColors.accent} style={{ marginTop: 40 }} />;
+  }
+
+  const concentratingSpell = spells.find((s) => s.id === activeConcentrationId);
+  const cantrips = spells.filter((s) => s.level === 0);
+  const leveled = Array.from({ length: 9 }, (_, i) => i + 1)
+    .map((lvl) => ({ level: lvl, spells: spells.filter((s) => s.level === lvl) }))
+    .filter((g) => g.spells.length > 0);
+
+  return (
+    <>
+      <View style={spellStyles.header}>
+        <Text style={spellStyles.title}>Spells &amp; Spell Slots</Text>
+        <View style={spellStyles.headerActions}>
+          <Pressable onPress={handleLongRest} style={spellStyles.restBtn}>
+            <Text style={spellStyles.restBtnText}>Long Rest</Text>
+          </Pressable>
+          <Pressable onPress={() => setShowModal(true)} style={spellStyles.addBtn}>
+            <MaterialIcons name="add" size={16} color="#fff" />
+          </Pressable>
+        </View>
+      </View>
+
+      {concentratingSpell && (
+        <View style={spellStyles.concBanner}>
+          <MaterialIcons name="brightness-1" size={10} color={DnDColors.accentLight} />
+          <Text style={spellStyles.concBannerText}>
+            Concentrating: <Text style={spellStyles.concBannerSpell}>{concentratingSpell.name}</Text>
+          </Text>
+          <Pressable onPress={() => setActiveConcentrationId(null)} style={spellStyles.concEndBtn}>
+            <Text style={spellStyles.concEndText}>End</Text>
+          </Pressable>
+        </View>
+      )}
+
+      <View style={spellStyles.sectionCard}>
+        <View style={spellStyles.slotHeader}>
+          <Text style={spellStyles.sectionTitle}>Spell Slots</Text>
+          <Pressable onPress={openSlotsModal} style={spellStyles.editSlotsBtn}>
+            <MaterialIcons name="edit" size={13} color={DnDColors.accentLight} />
+            <Text style={spellStyles.editSlotsBtnText}>Edit</Text>
+          </Pressable>
+        </View>
+        {slots.filter((s) => s.total > 0).length > 0 ? (
+          slots.filter((s) => s.total > 0).map((slot) => (
+            <View key={slot.id} style={spellStyles.slotRow}>
+              <Text style={spellStyles.slotLabel}>Level {slot.slot_level}</Text>
+              <View style={spellStyles.pips}>
+                {Array.from({ length: slot.total }, (_, i) => (
+                  <View key={i} style={[spellStyles.pip, i < slot.remaining ? spellStyles.pipFull : spellStyles.pipEmpty]} />
+                ))}
+              </View>
+              <Text style={spellStyles.slotCount}>{slot.remaining}/{slot.total}</Text>
+            </View>
+          ))
+        ) : (
+          <Pressable onPress={openSlotsModal} style={spellStyles.noSlotsPrompt}>
+            <MaterialIcons name="add-circle-outline" size={18} color={DnDColors.accentLight} />
+            <Text style={spellStyles.noSlotsText}>Tap to configure spell slots</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {cantrips.length > 0 && (
+        <View style={spellStyles.spellGroup}>
+          <Text style={spellStyles.groupTitle}>Cantrips</Text>
+          {cantrips.map((s) => (
+            <SpellCard key={s.id} spell={s} onDelete={() => handleDeleteSpell(s)} />
+          ))}
+        </View>
+      )}
+
+      {leveled.map(({ level, spells: ls }) => (
+        <View key={level} style={spellStyles.spellGroup}>
+          <Text style={spellStyles.groupTitle}>Level {level} Spells</Text>
+          {ls.map((s) => (
+            <SpellCard
+              key={s.id}
+              spell={s}
+              onDelete={() => handleDeleteSpell(s)}
+              onCast={() => handleCast(s)}
+              isConcentrating={activeConcentrationId === s.id}
+            />
+          ))}
+        </View>
+      ))}
+
+      {spells.length === 0 && (
+        <Text style={spellStyles.emptyText}>No spells yet. Tap + to add one.</Text>
+      )}
+
+      <Modal visible={showModal} animationType="slide" transparent>
+        <View style={spellStyles.modalOverlay}>
+          <View style={spellStyles.modalCard}>
+            <View style={spellStyles.modalHeader}>
+              <Text style={spellStyles.modalTitle}>Add Spell</Text>
+              <Pressable onPress={() => setShowModal(false)}>
+                <MaterialIcons name="close" size={20} color={DnDColors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <InputField label="Spell Name *" value={form.name} onChangeText={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="e.g. Fireball" />
+
+              <Text style={spellStyles.pickerLabel}>Level</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={spellStyles.levelPicker}>
+                {SPELL_LEVELS.map(({ label, value }) => (
+                  <Pressable
+                    key={value}
+                    onPress={() => setForm((p) => ({ ...p, level: value }))}
+                    style={[spellStyles.levelChip, form.level === value && spellStyles.levelChipActive]}
+                  >
+                    <Text style={[spellStyles.levelChipText, form.level === value && spellStyles.levelChipTextActive]}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              <InputField label="Casting Time" value={form.casting_time} onChangeText={(v) => setForm((p) => ({ ...p, casting_time: v }))} placeholder="1 action" />
+              <InputField label="Range" value={form.range} onChangeText={(v) => setForm((p) => ({ ...p, range: v }))} placeholder="30 feet" />
+              <InputField label="Components" value={form.components} onChangeText={(v) => setForm((p) => ({ ...p, components: v }))} placeholder="V, S" />
+              <InputField label="Duration" value={form.duration} onChangeText={(v) => setForm((p) => ({ ...p, duration: v }))} placeholder="Instantaneous" />
+              <InputField label="Description" value={form.description} onChangeText={(v) => setForm((p) => ({ ...p, description: v }))} placeholder="Spell description..." multiline numberOfLines={3} />
+
+              <View style={spellStyles.switchRow}>
+                <Text style={spellStyles.switchLabel}>Requires Concentration</Text>
+                <Switch
+                  value={form.requires_concentration}
+                  onValueChange={(v) => setForm((p) => ({ ...p, requires_concentration: v }))}
+                  trackColor={{ false: DnDColors.border, true: DnDColors.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              <PrimaryButton label="Add Spell" onPress={handleAddSpell} style={{ marginTop: 8 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showSlotsModal} animationType="slide" transparent>
+        <View style={spellStyles.modalOverlay}>
+          <View style={spellStyles.modalCard}>
+            <View style={spellStyles.modalHeader}>
+              <Text style={spellStyles.modalTitle}>Configure Spell Slots</Text>
+              <Pressable onPress={() => setShowSlotsModal(false)}>
+                <MaterialIcons name="close" size={20} color={DnDColors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {Array.from({ length: 9 }, (_, i) => i + 1).map((lvl) => (
+                <View key={lvl} style={spellStyles.slotDraftRow}>
+                  <Text style={spellStyles.slotDraftLabel}>Level {lvl}</Text>
+                  <View style={spellStyles.slotDraftStepper}>
+                    <Pressable
+                      onPress={() => setSlotDraft((p) => ({ ...p, [lvl]: String(Math.max(0, (parseInt(p[lvl]) || 0) - 1)) }))}
+                      style={spellStyles.stepBtn}
+                    >
+                      <Text style={spellStyles.stepBtnText}>−</Text>
+                    </Pressable>
+                    <TextInput
+                      style={spellStyles.slotDraftInput}
+                      value={slotDraft[lvl] ?? '0'}
+                      onChangeText={(v) => setSlotDraft((p) => ({ ...p, [lvl]: v }))}
+                      keyboardType="numeric"
+                      maxLength={2}
+                    />
+                    <Pressable
+                      onPress={() => setSlotDraft((p) => ({ ...p, [lvl]: String((parseInt(p[lvl]) || 0) + 1) }))}
+                      style={spellStyles.stepBtn}
+                    >
+                      <Text style={spellStyles.stepBtnText}>+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+              <PrimaryButton
+                label={savingSlots ? 'Saving…' : 'Save Slots'}
+                onPress={handleSaveSlots}
+                loading={savingSlots}
+                style={{ marginTop: 12 }}
+              />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Toast message={toast} onHide={() => setToast(null)} />
+    </>
+  );
+}
+
+const spellStyles = StyleSheet.create({
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  title: { color: DnDColors.text, fontSize: 18, fontWeight: '700', flex: 1 },
+  headerActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  restBtn: {
+    paddingVertical: 6, paddingHorizontal: 10,
+    backgroundColor: DnDColors.surface, borderRadius: 6,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  restBtnText: { color: DnDColors.textMuted, fontSize: 12, fontWeight: '600' },
+  addBtn: {
+    backgroundColor: DnDColors.accent, width: 32, height: 32,
+    borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+  },
+  concBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: DnDColors.accent + '22',
+    borderRadius: 8, padding: 10, marginBottom: 14,
+    borderWidth: 1, borderColor: DnDColors.accentLight + '55',
+  },
+  concBannerText: { color: DnDColors.textMuted, fontSize: 13, flex: 1 },
+  concBannerSpell: { color: DnDColors.accentLight, fontWeight: '700' },
+  concEndBtn: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: DnDColors.surfaceRaised, borderRadius: 5,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  concEndText: { color: DnDColors.textMuted, fontSize: 12, fontWeight: '600' },
+  sectionCard: {
+    backgroundColor: DnDColors.surface, borderRadius: 12,
+    padding: 14, marginBottom: 16,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  sectionTitle: {
+    color: DnDColors.textMuted, fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  slotHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  editSlotsBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  editSlotsBtnText: { color: DnDColors.accentLight, fontSize: 12, fontWeight: '600' },
+  noSlotsPrompt: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  noSlotsText: { color: DnDColors.accentLight, fontSize: 13 },
+  slotDraftRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: DnDColors.border + '60',
+  },
+  slotDraftLabel: { color: DnDColors.text, fontSize: 15 },
+  slotDraftStepper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stepBtn: {
+    backgroundColor: DnDColors.surfaceRaised, width: 32, height: 32,
+    borderRadius: 6, alignItems: 'center', justifyContent: 'center',
+  },
+  stepBtnText: { color: DnDColors.text, fontSize: 18, fontWeight: '600', lineHeight: 22 },
+  slotDraftInput: {
+    color: DnDColors.text, fontSize: 16, fontWeight: '700',
+    textAlign: 'center', minWidth: 32,
+  },
+  slotRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 10 },
+  slotLabel: { color: DnDColors.textMuted, fontSize: 13, width: 56 },
+  pips: { flexDirection: 'row', gap: 4, flex: 1 },
+  pip: { width: 10, height: 10, borderRadius: 5 },
+  pipFull: { backgroundColor: DnDColors.accentLight },
+  pipEmpty: { backgroundColor: DnDColors.border },
+  slotCount: { color: DnDColors.textMuted, fontSize: 12, width: 32, textAlign: 'right' },
+  spellGroup: { marginBottom: 16 },
+  groupTitle: {
+    color: DnDColors.textMuted, fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  emptyText: { color: DnDColors.textMuted, textAlign: 'center', marginTop: 40 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalCard: {
+    backgroundColor: DnDColors.surface, borderTopLeftRadius: 20,
+    borderTopRightRadius: 20, padding: 20, maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 16,
+  },
+  modalTitle: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
+  pickerLabel: {
+    color: DnDColors.textMuted, fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  levelPicker: { marginBottom: 12 },
+  levelChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+    backgroundColor: DnDColors.surfaceRaised, marginRight: 6,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  levelChipActive: { backgroundColor: DnDColors.accent, borderColor: DnDColors.accent },
+  levelChipText: { color: DnDColors.textMuted, fontSize: 13 },
+  levelChipTextActive: { color: '#fff', fontWeight: '600' },
+  switchRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', paddingVertical: 10,
+  },
+  switchLabel: { color: DnDColors.text, fontSize: 15 },
+});
+
+// ─── Inventory Tab ────────────────────────────────────────────────────────────
+
+function InventoryTab({ charId, token, character }: { charId: number; token: string; character: Character }) {
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const [form, setForm] = useState({
+    name: '', item_type: 'other' as ItemType, weight: '0', quantity: '1',
+    equipped: false, armor_class_bonus: '0',
+    damage_dice: '', damage_type: '' as DamageType, damage_bonus: '0',
+  });
+
+  const load = useCallback(async () => {
+    const data = await api.getInventory(token, charId);
+    setItems(data);
+    setLoading(false);
+  }, [token, charId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalWeightNum = items.reduce((sum, i) => sum + i.weight * i.quantity, 0);
+  const totalWeight = totalWeightNum.toFixed(1);
+  const carryCapacity = character.strength * 15;
+  const weightPercent = carryCapacity > 0 ? Math.min(totalWeightNum / carryCapacity, 1) : 0;
+  const weightColor = weightPercent > 0.9 ? DnDColors.danger : weightPercent > 0.66 ? '#E67E22' : DnDColors.success;
+
+  const handleAddItem = async () => {
+    if (!form.name.trim()) return;
+    try {
+      const item = await api.addItem(token, charId, {
+        name: form.name.trim(),
+        item_type: form.item_type,
+        weight: parseFloat(form.weight) || 0,
+        quantity: parseInt(form.quantity) || 1,
+        equipped: form.equipped,
+        armor_class_bonus: parseInt(form.armor_class_bonus) || 0,
+        damage_dice: form.damage_dice.trim(),
+        damage_type: form.damage_type,
+        damage_bonus: parseInt(form.damage_bonus) || 0,
+      });
+      setItems((prev) => [...prev, item]);
+      setShowModal(false);
+      setForm({ name: '', item_type: 'other', weight: '0', quantity: '1', equipped: false, armor_class_bonus: '0', damage_dice: '', damage_type: '', damage_bonus: '0' });
+      setToast('Item added!');
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Failed to add item.');
+    }
+  };
+
+  const handleUpdateQty = async (item: InventoryItem, delta: number) => {
+    const newQty = Math.max(1, item.quantity + delta);
+    if (newQty === item.quantity) return;
+    const updated = await api.updateItem(token, charId, item.id, { quantity: newQty });
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+  };
+
+  const handleEquip = async (item: InventoryItem) => {
+    const updated = await api.updateItem(token, charId, item.id, { equipped: !item.equipped });
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+  };
+
+  const handleDelete = (item: InventoryItem) => {
+    Alert.alert('Remove Item', `Remove ${item.name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive',
+        onPress: async () => {
+          await api.deleteItem(token, charId, item.id);
+          setItems((prev) => prev.filter((i) => i.id !== item.id));
+        },
+      },
+    ]);
+  };
+
+  if (loading) {
+    return <ActivityIndicator color={DnDColors.accent} style={{ marginTop: 40 }} />;
+  }
+
+  const equipped = items.filter((i) => i.equipped);
+  const stored = items.filter((i) => !i.equipped);
+
+  return (
+    <>
+      <View style={invStyles.header}>
+        <View style={invStyles.titleBlock}>
+          <Text style={invStyles.title}>Inventory</Text>
+          <Text style={invStyles.weight}>
+            {totalWeight} / {carryCapacity} lbs
+          </Text>
+          <View style={invStyles.weightBarBg}>
+            <View style={[invStyles.weightBarFill, { width: `${weightPercent * 100}%` as any, backgroundColor: weightColor }]} />
+          </View>
+        </View>
+        <Pressable onPress={() => setShowModal(true)} style={invStyles.addBtn}>
+          <MaterialIcons name="add" size={16} color="#fff" />
+          <Text style={invStyles.addBtnText}>Add Item</Text>
+        </Pressable>
+      </View>
+
+      {equipped.length > 0 && (
+        <View style={invStyles.section}>
+          <Text style={invStyles.sectionTitle}>Equipped Items</Text>
+          {equipped.map((item) => (
+            <InventoryItemRow
+              key={item.id}
+              item={item}
+              onIncrease={() => handleUpdateQty(item, 1)}
+              onDecrease={() => handleUpdateQty(item, -1)}
+              onDelete={() => handleDelete(item)}
+              onEquip={() => handleEquip(item)}
+            />
+          ))}
+        </View>
+      )}
+
+      <View style={invStyles.section}>
+        <Text style={invStyles.sectionTitle}>Stored Items</Text>
+        {stored.map((item) => (
+          <InventoryItemRow
+            key={item.id}
+            item={item}
+            onIncrease={() => handleUpdateQty(item, 1)}
+            onDecrease={() => handleUpdateQty(item, -1)}
+            onDelete={() => handleDelete(item)}
+            onEquip={() => handleEquip(item)}
+          />
+        ))}
+        {stored.length === 0 && equipped.length === 0 && (
+          <Text style={invStyles.emptyText}>No items yet. Tap Add Item to get started.</Text>
+        )}
+      </View>
+
+      <Modal visible={showModal} animationType="slide" transparent>
+        <View style={invStyles.modalOverlay}>
+          <View style={invStyles.modalCard}>
+            <View style={invStyles.modalHeader}>
+              <Text style={invStyles.modalTitle}>Add Item</Text>
+              <Pressable onPress={() => setShowModal(false)}>
+                <MaterialIcons name="close" size={20} color={DnDColors.textMuted} />
+              </Pressable>
+            </View>
+
+            <InputField
+              label="Item Name *"
+              value={form.name}
+              onChangeText={(v) => setForm((p) => ({ ...p, name: v }))}
+              placeholder="e.g. Longsword"
+            />
+
+            <Text style={invStyles.pickerLabel}>Type</Text>
+            <View style={invStyles.typeRow}>
+              {(['weapon', 'armor', 'shield', 'other'] as ItemType[]).map((t) => (
+                <Pressable
+                  key={t}
+                  onPress={() => setForm((p) => ({ ...p, item_type: t }))}
+                  style={[invStyles.typeChip, form.item_type === t && invStyles.typeChipActive]}
+                >
+                  <Text style={[invStyles.typeChipText, form.item_type === t && invStyles.typeChipTextActive]}>
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={invStyles.row}>
+              <View style={invStyles.half}>
+                <InputField
+                  label="Weight (lbs)"
+                  value={form.weight}
+                  onChangeText={(v) => setForm((p) => ({ ...p, weight: v }))}
+                  keyboardType="numeric"
+                  placeholder="0"
+                />
+              </View>
+              <View style={invStyles.half}>
+                <InputField
+                  label="Quantity"
+                  value={form.quantity}
+                  onChangeText={(v) => setForm((p) => ({ ...p, quantity: v }))}
+                  keyboardType="numeric"
+                  placeholder="1"
+                />
+              </View>
+            </View>
+
+            {(form.item_type === 'armor' || form.item_type === 'shield') && (
+              <InputField
+                label="AC Bonus"
+                value={form.armor_class_bonus}
+                onChangeText={(v) => setForm((p) => ({ ...p, armor_class_bonus: v }))}
+                keyboardType="numeric"
+                placeholder="0"
+              />
+            )}
+
+            {form.item_type === 'weapon' && (
+              <>
+                <View style={invStyles.row}>
+                  <View style={invStyles.half}>
+                    <InputField
+                      label="Damage Dice"
+                      value={form.damage_dice}
+                      onChangeText={(v) => setForm((p) => ({ ...p, damage_dice: v }))}
+                      placeholder="e.g. 1d8"
+                    />
+                  </View>
+                  <View style={invStyles.half}>
+                    <InputField
+                      label="Magic Bonus"
+                      value={form.damage_bonus}
+                      onChangeText={(v) => setForm((p) => ({ ...p, damage_bonus: v }))}
+                      keyboardType="numeric"
+                      placeholder="0"
+                    />
+                  </View>
+                </View>
+
+                <Text style={invStyles.pickerLabel}>Damage Type</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={invStyles.damageTypeScroll}>
+                  {(['slashing', 'piercing', 'bludgeoning', 'fire', 'cold', 'lightning', 'poison', 'acid', 'thunder', 'necrotic', 'radiant', 'force', 'psychic'] as DamageType[]).map((dt) => (
+                    <Pressable
+                      key={dt}
+                      onPress={() => setForm((p) => ({ ...p, damage_type: p.damage_type === dt ? '' : dt }))}
+                      style={[invStyles.typeChip, form.damage_type === dt && invStyles.typeChipActive]}
+                    >
+                      <Text style={[invStyles.typeChipText, form.damage_type === dt && invStyles.typeChipTextActive]}>
+                        {dt.charAt(0).toUpperCase() + dt.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+
+            <View style={invStyles.switchRow}>
+              <Text style={invStyles.switchLabel}>Equipped</Text>
+              <Switch
+                value={form.equipped}
+                onValueChange={(v) => setForm((p) => ({ ...p, equipped: v }))}
+                trackColor={{ false: DnDColors.border, true: DnDColors.accent }}
+                thumbColor="#fff"
+              />
+            </View>
+
+            <PrimaryButton label="Add Item" onPress={handleAddItem} style={{ marginTop: 12 }} />
+          </View>
+        </View>
+      </Modal>
+
+      <Toast message={toast} onHide={() => setToast(null)} />
+    </>
+  );
+}
+
+const invStyles = StyleSheet.create({
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  titleBlock: { flex: 1 },
+  title: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
+  weight: { color: DnDColors.textMuted, fontSize: 11, marginTop: 1 },
+  weightBarBg: {
+    height: 4, width: '100%', backgroundColor: DnDColors.surfaceRaised,
+    borderRadius: 2, marginTop: 4, overflow: 'hidden',
+  },
+  weightBarFill: { height: '100%', borderRadius: 2 },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: DnDColors.accent, borderRadius: 8,
+    paddingVertical: 8, paddingHorizontal: 12,
+  },
+  addBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  section: { marginBottom: 20 },
+  sectionTitle: {
+    color: DnDColors.textMuted, fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  emptyText: { color: DnDColors.textMuted, textAlign: 'center', marginTop: 20 },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: DnDColors.surface, borderTopLeftRadius: 20,
+    borderTopRightRadius: 20, padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 16,
+  },
+  modalTitle: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
+  row: { flexDirection: 'row', gap: 12 },
+  half: { flex: 1 },
+  pickerLabel: {
+    color: DnDColors.textMuted, fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  typeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  damageTypeScroll: { marginBottom: 12 },
+  typeChip: {
+    flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center',
+    backgroundColor: DnDColors.surfaceRaised,
+    borderWidth: 1, borderColor: DnDColors.border,
+  },
+  typeChipActive: { backgroundColor: DnDColors.accent, borderColor: DnDColors.accent },
+  typeChipText: { color: DnDColors.textMuted, fontSize: 13 },
+  typeChipTextActive: { color: '#fff', fontWeight: '600' },
+  switchRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', paddingVertical: 8,
+  },
+  switchLabel: { color: DnDColors.text, fontSize: 15 },
+});
+
 // ─── Shared UI helpers ────────────────────────────────────────────────────────
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -596,36 +1328,6 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DnDColors.background },
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: DnDColors.border,
-    gap: 12,
-  },
-  backBtn: { padding: 4 },
-  headerCenter: { flex: 1 },
-  charName: { color: DnDColors.text, fontSize: 18, fontWeight: '700' },
-  charMeta: { color: DnDColors.textMuted, fontSize: 12, marginTop: 1 },
-  headerActions: { alignItems: 'flex-end', gap: 6, flexDirection: 'row' },
-  editBtn: { paddingVertical: 6, paddingHorizontal: 14 },
-  editBtnOutline: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingVertical: 6, paddingHorizontal: 12,
-    borderRadius: 6, borderWidth: 1, borderColor: DnDColors.accentLight,
-  },
-  editBtnText: { color: DnDColors.accentLight, fontSize: 13, fontWeight: '600' },
-  subNav: {
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: DnDColors.border,
-  },
-  subNavBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingVertical: 4, paddingHorizontal: 10,
-    backgroundColor: DnDColors.surface, borderRadius: 6,
-    borderWidth: 1, borderColor: DnDColors.border,
-  },
-  subNavText: { color: DnDColors.textMuted, fontSize: 12, fontWeight: '600' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 32 },
   sectionCard: {
@@ -714,15 +1416,6 @@ const styles = StyleSheet.create({
   },
   combatStatValue: { color: DnDColors.text, fontSize: 22, fontWeight: '700' },
   combatStatLabel: { color: DnDColors.textMuted, fontSize: 11, marginTop: 4 },
-
-  // Level Up button (header)
-  levelUpBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8,
-    borderWidth: 1, borderColor: DnDColors.success + '66',
-    backgroundColor: DnDColors.success + '11',
-  },
-  levelUpBtnText: { color: DnDColors.success, fontSize: 11, fontWeight: '700' },
 
   // Level Up modal
   luOverlay: {

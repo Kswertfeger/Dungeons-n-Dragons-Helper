@@ -88,16 +88,24 @@ export type InventoryItem = {
   created_at: string;
 };
 
+export type RollMode = 'normal' | 'advantage' | 'disadvantage';
+
 export type RollHistory = {
   id: number;
   roll_type: string;
   dice_type: string;
   num_dice: number;
+  roll_mode: RollMode;
+  discarded_roll: number | null;
   base_roll: number;
   modifier: number;
   total: number;
   note: string;
   created_at: string;
+};
+
+export type Profile = {
+  active_character: number | null;
 };
 
 // ── Core fetch helper ──────────────────────────────────────────────────────
@@ -218,17 +226,27 @@ export const api = {
     request<void>(`/api/characters/${charId}/inventory/${itemId}/`, { method: 'DELETE' }, token),
 
   // Roll History
-  getRolls: (token: string) =>
-    request<RollHistory[]>('/api/rolls/', {}, token),
+  getRolls: (token: string, charId: number) =>
+    request<RollHistory[]>(`/api/characters/${charId}/rolls/`, {}, token),
 
-  saveRoll: (token: string, data: Omit<RollHistory, 'id' | 'created_at'>) =>
-    request<RollHistory>('/api/rolls/', {
+  saveRoll: (token: string, charId: number, data: Omit<RollHistory, 'id' | 'created_at'>) =>
+    request<RollHistory>(`/api/characters/${charId}/rolls/`, {
       method: 'POST',
       body: JSON.stringify(data),
     }, token),
 
-  clearRolls: (token: string) =>
-    request<void>('/api/rolls/clear/', { method: 'DELETE' }, token),
+  clearRolls: (token: string, charId: number) =>
+    request<void>(`/api/characters/${charId}/rolls/clear/`, { method: 'DELETE' }, token),
+
+  // Profile / active character
+  getActiveCharacter: (token: string) =>
+    request<Profile>('/api/profile/', {}, token),
+
+  setActiveCharacter: (token: string, charId: number) =>
+    request<Profile>('/api/profile/', {
+      method: 'PATCH',
+      body: JSON.stringify({ active_character: charId }),
+    }, token),
 
   // Dice
   analyzeDice: async (imageUri: string) => {

@@ -39,6 +39,8 @@ const styles = StyleSheet.create({
     borderBottomColor: DnDColors.border,
   },
   scrollContainer: {
+    height: 48,
+    flexGrow: 0,
     borderBottomWidth: 1,
     borderBottomColor: DnDColors.border,
   },

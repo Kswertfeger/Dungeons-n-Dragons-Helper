@@ -29,7 +29,7 @@ export default function RegisterScreen() {
     setError(null);
     try {
       await register(username.trim(), password, password2);
-      router.replace('/(tabs)');
+      router.replace('/');
     } catch (e: any) {
       setError(e.message ?? 'Registration failed. Please try again.');
     } finally {

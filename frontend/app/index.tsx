@@ -108,7 +108,10 @@ export default function DashboardScreen() {
             return (
               <CharacterCard
                 character={item}
-                onPress={() => router.push(`/character/${item.id}`)}
+                onPress={() => {
+                  if (token) api.setActiveCharacter(token, item.id).catch(() => {});
+                  router.push(`/character/${item.id}`);
+                }}
                 onDelete={() => handleDelete(item)}
               />
             );

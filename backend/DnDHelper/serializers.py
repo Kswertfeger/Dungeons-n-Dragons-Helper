@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from characters.models import Character, Spell, SpellSlot, InventoryItem, RollHistory
+from characters.models import Character, Spell, SpellSlot, InventoryItem, RollHistory, Profile
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -54,6 +54,18 @@ class SpellSlotSerializer(serializers.ModelSerializer):
         model = SpellSlot
         exclude = ['character']
 
+    def validate_slot_level(self, value):
+        character = self.context.get('character')
+        if character is not None:
+            qs = SpellSlot.objects.filter(character=character, slot_level=value)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    f"Level {value} slots already exist for this character."
+                )
+        return value
+
 
 class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -66,3 +78,15 @@ class RollHistorySerializer(serializers.ModelSerializer):
         model = RollHistory
         exclude = ['user', 'character']
         read_only_fields = ['created_at']
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Profile
+        fields = ['active_character']
+
+    def validate_active_character(self, value):
+        request = self.context.get('request')
+        if value is not None and request is not None and value.user != request.user:
+            raise serializers.ValidationError("Character not found.")
+        return value

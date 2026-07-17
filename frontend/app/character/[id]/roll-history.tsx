@@ -2,7 +2,8 @@ import { RollHistoryItem } from '@/components/roll-history-item';
 import { DnDColors, RollTypeBadgeColors } from '@/constants/colors';
 import { useAuth } from '@/context/auth-context';
 import { api, type RollHistory } from '@/services/api';
-import { useFocusEffect } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,7 +20,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const FILTERS = ['All', 'STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA', 'CUSTOM'] as const;
 type Filter = typeof FILTERS[number];
 
-export default function RollHistoryScreen() {
+export default function CharacterRollHistoryScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const charId = parseInt(id);
   const { token } = useAuth();
   const [rolls, setRolls] = useState<RollHistory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,12 +31,12 @@ export default function RollHistoryScreen() {
   const load = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await api.getRolls(token);
+      const data = await api.getRolls(token, charId);
       setRolls(data);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, charId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -45,7 +48,7 @@ export default function RollHistoryScreen() {
   const handleClear = () => {
     Alert.alert(
       'Clear Roll History',
-      'Are you sure you want to delete all roll history?',
+      'Are you sure you want to delete all roll history for this character?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -53,7 +56,7 @@ export default function RollHistoryScreen() {
           style: 'destructive',
           onPress: async () => {
             if (!token) return;
-            await api.clearRolls(token);
+            await api.clearRolls(token, charId);
             setRolls([]);
           },
         },
@@ -76,6 +79,9 @@ export default function RollHistoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+          <MaterialIcons name="arrow-back" size={20} color={DnDColors.text} />
+        </Pressable>
         <Text style={styles.title}>Roll History</Text>
         {rolls.length > 0 && (
           <Pressable onPress={handleClear} style={styles.clearBtn}>
@@ -135,7 +141,7 @@ export default function RollHistoryScreen() {
           ListEmptyComponent={
             <Text style={styles.emptyText}>
               {activeFilter === 'All'
-                ? 'No rolls yet. Head to the Dice tab to start rolling!'
+                ? 'No rolls yet. Use the dice button to start rolling!'
                 : `No ${activeFilter} rolls yet.`}
             </Text>
           }
@@ -158,11 +164,12 @@ function StatBox({ label, value, highlight }: { label: string; value: string; hi
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DnDColors.background },
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 16,
     borderBottomWidth: 1, borderBottomColor: DnDColors.border,
   },
-  title: { color: DnDColors.text, fontSize: 22, fontWeight: '800' },
+  backBtn: { padding: 4 },
+  title: { color: DnDColors.text, fontSize: 22, fontWeight: '800', flex: 1 },
   clearBtn: {
     paddingVertical: 6, paddingHorizontal: 12,
     backgroundColor: DnDColors.danger + '22',

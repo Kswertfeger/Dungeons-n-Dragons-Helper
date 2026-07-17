@@ -14,6 +14,11 @@ export function RollHistoryItem({ roll }: Props) {
   const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 
+  const hasAdvDis = roll.roll_mode !== 'normal' && roll.discarded_roll !== null;
+  const isAdvantage = roll.roll_mode === 'advantage';
+  const rolledHigh = hasAdvDis ? Math.max(roll.base_roll, roll.discarded_roll!) : null;
+  const rolledLow = hasAdvDis ? Math.min(roll.base_roll, roll.discarded_roll!) : null;
+
   return (
     <View style={styles.row}>
       <View style={[styles.badge, { backgroundColor: badgeColor }]}>
@@ -26,6 +31,11 @@ export function RollHistoryItem({ roll }: Props) {
           <StatItem label="Modifier" value={modLabel} />
           <StatItem label="Total" value={String(roll.total)} highlight />
         </View>
+        {hasAdvDis && (
+          <Text style={[styles.advDisText, isAdvantage ? styles.advText : styles.disText]}>
+            {isAdvantage ? 'Advantage' : 'Disadvantage'} — rolled {rolledHigh}, {rolledLow} · kept {roll.base_roll}
+          </Text>
+        )}
         <Text style={styles.meta}>
           {roll.num_dice}{roll.dice_type}  ·  {dateStr} {timeStr}
         </Text>
@@ -93,6 +103,17 @@ const styles = StyleSheet.create({
   },
   highlight: {
     color: DnDColors.accentLight,
+  },
+  advDisText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 3,
+  },
+  advText: {
+    color: DnDColors.success,
+  },
+  disText: {
+    color: DnDColors.danger,
   },
   meta: {
     color: DnDColors.textDisabled,

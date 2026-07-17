@@ -24,7 +24,7 @@ export default function LoginScreen() {
     setError(null);
     try {
       await login(username.trim(), password);
-      router.replace('/(tabs)');
+      router.replace('/');
     } catch (e: any) {
       setError(e.message ?? 'Login failed. Please try again.');
     } finally {
