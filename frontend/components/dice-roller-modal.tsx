@@ -1,6 +1,7 @@
 import { DiceScanModal, type ScanResult } from '@/components/dice-scan-modal';
 import { RollHistoryItem } from '@/components/roll-history-item';
 import { DnDColors } from '@/constants/colors';
+import { useIsWide } from '@/hooks/use-breakpoint';
 import { api, type Character, type RollHistory, type RollMode } from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -42,6 +43,7 @@ type Props = {
 type RollResult = { base: number; mod: number; total: number; mode: RollMode; discarded: number | null };
 
 export function DiceRollerModal({ visible, onClose, token, characterId, character }: Props) {
+  const isWide = useIsWide();
   const [rollResult, setRollResult] = useState<RollResult | null>(null);
   const [recentRolls, setRecentRolls] = useState<RollHistory[]>([]);
   const [scanModalVisible, setScanModalVisible] = useState(false);
@@ -137,9 +139,9 @@ export function DiceRollerModal({ visible, onClose, token, characterId, characte
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+    <Modal visible={visible} animationType={isWide ? 'fade' : 'slide'} transparent onRequestClose={onClose}>
+      <View style={[styles.overlay, isWide && styles.overlayWide]}>
+        <View style={[styles.sheet, isWide && styles.sheetWide]}>
           <View style={styles.header}>
             <Text style={styles.title}>Roll Dice</Text>
             <Pressable onPress={onClose} style={styles.closeBtn}>
@@ -287,10 +289,15 @@ export function DiceRollerModal({ visible, onClose, token, characterId, characte
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  overlayWide: { justifyContent: 'center', alignItems: 'center' },
   sheet: {
     backgroundColor: DnDColors.background,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     maxHeight: '92%', paddingTop: 8,
+  },
+  sheetWide: {
+    width: 520, maxWidth: '92%', maxHeight: '90%',
+    borderRadius: 20,
   },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',

@@ -2,6 +2,7 @@ import { CharacterCard, CreateCharacterCard } from '@/components/character-card'
 import { Toast } from '@/components/toast';
 import { DnDColors } from '@/constants/colors';
 import { useAuth } from '@/context/auth-context';
+import { useBreakpoint } from '@/hooks/use-breakpoint';
 import { api, type Character } from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
@@ -18,8 +19,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+type GridItem = Character | 'create' | { phantom: number };
+
+const NUM_COLUMNS = { mobile: 2, tablet: 3, desktop: 4 };
+
 export default function DashboardScreen() {
   const { token, username, logout } = useAuth();
+  const breakpoint = useBreakpoint();
+  const numColumns = NUM_COLUMNS[breakpoint];
   const [characters, setCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -74,8 +81,15 @@ export default function DashboardScreen() {
     }
   };
 
-  // Build list data: characters + create card sentinel
-  const listData: (Character | 'create')[] = [...characters, 'create'];
+  // Build list data: characters + create card sentinel, padded with phantom
+  // spacers on wider grids so a short last row doesn't stretch to fill it.
+  const baseData: GridItem[] = [...characters, 'create'];
+  const remainder = baseData.length % numColumns;
+  const phantomCount = numColumns > 2 && remainder > 0 ? numColumns - remainder : 0;
+  const listData: GridItem[] = [
+    ...baseData,
+    ...Array.from({ length: phantomCount }, (_, i) => ({ phantom: i })),
+  ];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -98,12 +112,20 @@ export default function DashboardScreen() {
       ) : (
         <FlatList
           data={listData}
-          keyExtractor={(item) => (item === 'create' ? 'create' : String(item.id))}
-          numColumns={2}
+          key={numColumns}
+          keyExtractor={(item) => {
+            if (item === 'create') return 'create';
+            if (typeof item === 'object' && 'phantom' in item) return `phantom-${item.phantom}`;
+            return String(item.id);
+          }}
+          numColumns={numColumns}
           contentContainerStyle={styles.grid}
           renderItem={({ item }) => {
             if (item === 'create') {
               return <CreateCharacterCard onPress={() => router.push('/create-character')} />;
+            }
+            if (typeof item === 'object' && 'phantom' in item) {
+              return <View style={styles.phantomCard} />;
             }
             return (
               <CharacterCard
@@ -166,6 +188,10 @@ const styles = StyleSheet.create({
   },
   grid: {
     padding: 10,
+  },
+  phantomCard: {
+    flex: 1,
+    margin: 6,
   },
   loader: {
     marginTop: 60,

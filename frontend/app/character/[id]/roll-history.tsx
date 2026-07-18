@@ -1,7 +1,10 @@
+import { CharacterSidebar } from '@/components/character-sidebar';
 import { RollHistoryItem } from '@/components/roll-history-item';
 import { DnDColors, RollTypeBadgeColors } from '@/constants/colors';
+import { LAYOUT } from '@/constants/layout';
 import { useAuth } from '@/context/auth-context';
-import { api, type RollHistory } from '@/services/api';
+import { useIsWide } from '@/hooks/use-breakpoint';
+import { api, type Character, type RollHistory } from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -24,15 +27,21 @@ export default function CharacterRollHistoryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const charId = parseInt(id);
   const { token } = useAuth();
+  const isWide = useIsWide();
   const [rolls, setRolls] = useState<RollHistory[]>([]);
+  const [character, setCharacter] = useState<Character | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
 
   const load = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await api.getRolls(token, charId);
+      const [data, char] = await Promise.all([
+        api.getRolls(token, charId),
+        api.getCharacter(token, charId),
+      ]);
       setRolls(data);
+      setCharacter(char);
     } finally {
       setLoading(false);
     }
@@ -76,8 +85,8 @@ export default function CharacterRollHistoryScreen() {
     return { count: filtered.length, avg: avg.toFixed(1), highest };
   }, [filtered]);
 
-  return (
-    <SafeAreaView style={styles.container}>
+  const content = (
+    <>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <MaterialIcons name="arrow-back" size={20} color={DnDColors.text} />
@@ -148,6 +157,28 @@ export default function CharacterRollHistoryScreen() {
         />
       )}
       </View>
+    </>
+  );
+
+  if (isWide && character) {
+    return (
+      <SafeAreaView style={styles.wideContainer}>
+        <CharacterSidebar
+          character={character}
+          activeSection={null}
+          onSelectSection={(s) => router.navigate({ pathname: '/character/[id]', params: { id, section: s } })}
+          onSwitchCharacter={() => router.replace('/')}
+        />
+        <View style={styles.wideContentWrap}>
+          {content}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {content}
     </SafeAreaView>
   );
 }
@@ -163,6 +194,10 @@ function StatBox({ label, value, highlight }: { label: string; value: string; hi
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DnDColors.background },
+  wideContainer: { flex: 1, flexDirection: 'row', backgroundColor: DnDColors.background },
+  wideContentWrap: {
+    flex: 1, maxWidth: LAYOUT.contentMaxWidth, alignSelf: 'center', width: '100%',
+  },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 16,

@@ -14,18 +14,21 @@ type Props = {
   onEdit: () => void;
   onSave: () => void;
   onLevelUp: () => void;
+  hideSwitchLink?: boolean;
 };
 
 export function CharacterHeader({
   character, editing, saving, canLevelUp,
-  onSwitchCharacter, onEdit, onSave, onLevelUp,
+  onSwitchCharacter, onEdit, onSave, onLevelUp, hideSwitchLink = false,
 }: Props) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onSwitchCharacter} style={styles.switchBtn}>
-        <MaterialIcons name="swap-horiz" size={16} color={DnDColors.accentLight} />
-        <Text style={styles.switchText}>Switch Character</Text>
-      </Pressable>
+      {!hideSwitchLink && (
+        <Pressable onPress={onSwitchCharacter} style={styles.switchBtn}>
+          <MaterialIcons name="swap-horiz" size={16} color={DnDColors.accentLight} />
+          <Text style={styles.switchText}>Switch Character</Text>
+        </Pressable>
+      )}
 
       <View style={styles.nameRow}>
         <View style={styles.headerCenter}>

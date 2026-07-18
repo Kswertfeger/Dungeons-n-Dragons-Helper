@@ -1,5 +1,6 @@
 import { CharacterDiceOverlay } from '@/components/character-dice-overlay';
 import { CharacterHeader } from '@/components/character-header';
+import { CharacterSidebar, type Section } from '@/components/character-sidebar';
 import { InputField } from '@/components/input-field';
 import { InventoryItemRow } from '@/components/inventory-item-row';
 import { PrimaryButton } from '@/components/primary-button';
@@ -9,7 +10,9 @@ import { TabSwitcher } from '@/components/tab-switcher';
 import { Toast } from '@/components/toast';
 import { DnDColors } from '@/constants/colors';
 import { CLASSES } from '@/constants/dnd-data';
+import { LAYOUT } from '@/constants/layout';
 import { useAuth } from '@/context/auth-context';
+import { useIsWide } from '@/hooks/use-breakpoint';
 import {
   api,
   type Character,
@@ -60,13 +63,15 @@ const SKILLS: { name: string; stat: keyof Character }[] = [
 ];
 
 export default function CharacterSheetScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, section } = useLocalSearchParams<{ id: string; section?: string }>();
   const { token } = useAuth();
+  const isWide = useIsWide();
   const [character, setCharacter] = useState<Character | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+  const [activeSection, setActiveSection] = useState<Section>((section as Section) ?? 'overview');
   const [toast, setToast] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Character>>({});
   const [showLevelUp, setShowLevelUp] = useState(false);
@@ -81,6 +86,10 @@ export default function CharacterSheetScreen() {
       .catch(() => router.back())
       .finally(() => setLoading(false));
   }, [token, id]);
+
+  useEffect(() => {
+    if (section) setActiveSection(section as Section);
+  }, [section]);
 
   const proficiencyBonus = character ? Math.floor((character.level - 1) / 4) + 2 : 2;
 
@@ -127,6 +136,86 @@ export default function CharacterSheetScreen() {
     const m = Math.floor((v - 10) / 2);
     return m >= 0 ? `+${m}` : `${m}`;
   };
+
+  if (isWide) {
+    return (
+      <SafeAreaView style={styles.wideContainer}>
+        <CharacterSidebar
+          character={character}
+          activeSection={activeSection}
+          onSelectSection={setActiveSection}
+          onSwitchCharacter={() => router.replace('/')}
+        />
+
+        <View style={styles.widePane}>
+          <CharacterHeader
+            character={character}
+            editing={editing}
+            saving={saving}
+            canLevelUp={character.level < 20}
+            onSwitchCharacter={() => router.replace('/')}
+            onEdit={() => setEditing(true)}
+            onSave={handleSave}
+            onLevelUp={() => setShowLevelUp(true)}
+            hideSwitchLink
+          />
+
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.wideScrollContent}>
+            {activeSection === 'overview' && (
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewCol}>
+                  <StatsTab character={character} editing={editing} editForm={editForm} setField={setField} setNumField={setNumField} />
+                </View>
+                <View style={styles.overviewCol}>
+                  <SkillsTab
+                    character={character}
+                    proficiencyBonus={proficiencyBonus}
+                    onToggleProficiency={handleToggleProficiency}
+                  />
+                </View>
+                <View style={styles.overviewCol}>
+                  <CombatTab
+                    character={character}
+                    editing={editing}
+                    editForm={editForm}
+                    setNumField={setNumField}
+                    token={token!}
+                    onHpChange={setCharacter}
+                  />
+                </View>
+              </View>
+            )}
+            {activeSection === 'spells' && (
+              <View style={styles.wideContentPane}>
+                <SpellsTab charId={character.id} token={token!} />
+              </View>
+            )}
+            {activeSection === 'inventory' && (
+              <View style={styles.wideContentPane}>
+                <InventoryTab charId={character.id} token={token!} character={character} />
+              </View>
+            )}
+          </ScrollView>
+
+          <CharacterDiceOverlay character={character} token={token!} characterId={character.id} />
+        </View>
+
+        <Toast message={toast} onHide={() => setToast(null)} />
+
+        <LevelUpModal
+          character={character}
+          token={token!}
+          visible={showLevelUp}
+          onClose={() => setShowLevelUp(false)}
+          onSuccess={(updated) => {
+            setCharacter(updated);
+            setEditForm(updated);
+            setToast(`Leveled up to ${updated.level}!`);
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1330,6 +1419,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: DnDColors.background },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 32 },
+  wideContainer: { flex: 1, flexDirection: 'row', backgroundColor: DnDColors.background },
+  widePane: { flex: 1 },
+  wideScrollContent: { padding: 24, paddingBottom: 48 },
+  overviewRow: {
+    flexDirection: 'row', gap: 20,
+    maxWidth: LAYOUT.overviewMaxWidth, alignSelf: 'center', width: '100%',
+  },
+  overviewCol: { flex: 1 },
+  wideContentPane: {
+    maxWidth: LAYOUT.contentMaxWidth, alignSelf: 'center', width: '100%',
+  },
   sectionCard: {
     backgroundColor: DnDColors.surface, borderRadius: 12,
     padding: 16, marginBottom: 14,

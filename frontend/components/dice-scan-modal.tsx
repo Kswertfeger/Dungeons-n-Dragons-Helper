@@ -1,4 +1,5 @@
 import { DnDColors } from '@/constants/colors';
+import { useIsWide } from '@/hooks/use-breakpoint';
 import { api } from '@/services/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -22,6 +23,7 @@ type Props = {
 };
 
 export function DiceScanModal({ visible, onClose, onCaptured }: Props) {
+  const isWide = useIsWide();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,9 +57,9 @@ export function DiceScanModal({ visible, onClose, onCaptured }: Props) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+    <Modal visible={visible} animationType={isWide ? 'fade' : 'slide'} transparent onRequestClose={onClose}>
+      <View style={[styles.overlay, isWide && styles.overlayWide]}>
+        <View style={[styles.sheet, isWide && styles.sheetWide]}>
           <View style={styles.header}>
             <Text style={styles.title}>Scan Dice</Text>
             <Pressable onPress={onClose} style={styles.closeBtn}>
@@ -106,10 +108,15 @@ export function DiceScanModal({ visible, onClose, onCaptured }: Props) {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  overlayWide: { justifyContent: 'center', alignItems: 'center' },
   sheet: {
     backgroundColor: DnDColors.background,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     paddingTop: 8, paddingBottom: 24,
+  },
+  sheetWide: {
+    width: 520, maxWidth: '92%', maxHeight: '90%',
+    borderRadius: 20,
   },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
